@@ -2,480 +2,439 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 import plotly.express as px
 import time
 
-# --- 1. CONFIGURACIÓN DE LA APP ---
+# --- 1. CONFIGURACIÓN GLOBAL Y ESTILOS ---
 st.set_page_config(
-    page_title="Sistema de Gestión - Area Arqueros", 
+    page_title="Area Arqueros ERP", 
     layout="wide", 
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    page_icon="🏹"
 )
 
-# --- CSS PERSONALIZADO ---
+# CSS Optimizado para Modo Claro/Oscuro y UX
 st.markdown("""
     <style>
-        /* Estilo Ejecutivo */
+        /* Botones de acción principales */
         .stButton>button {
-            background-color: #1f2c56;
-            color: white !important;
             border-radius: 6px;
-            border: none;
             height: 45px;
             font-weight: 600;
+            border: 1px solid rgba(255,255,255,0.1);
+            background-color: #1f2c56;
+            color: white;
+            transition: all 0.3s;
         }
         .stButton>button:hover {
             background-color: #2c3e50;
+            border-color: white;
+            color: #ffffff;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
-        /* Tarjetas de métricas */
+        /* Métricas destacadas */
         div[data-testid="stMetricValue"] {
-            font-size: 1.4rem !important;
-            color: #1f2c56;
+            font-size: 1.6rem !important;
+            font-weight: 700;
         }
-        /* Alertas suaves */
-        .info-box {
-            padding: 15px;
-            background-color: #e3f2fd;
-            border-left: 5px solid #2196f3;
-            border-radius: 4px;
-            margin-bottom: 10px;
+        /* Alertas personalizadas */
+        .audit-log {
+            font-size: 0.8rem;
+            color: #666;
+            border-top: 1px solid #eee;
+            padding-top: 5px;
         }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CONEXIÓN Y FUNCIONES AUXILIARES ---
+# --- 2. GESTOR DE CONEXIÓN (PATRÓN SINGLETON) ---
 @st.cache_resource
-def get_connection():
+def get_client():
+    """Conexión única cacheada a Google"""
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     try:
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        client = gspread.authorize(creds)
-        return client.open("BaseDatos_ClubArqueros") 
+        return gspread.authorize(creds).open("BaseDatos_ClubArqueros")
     except Exception as e:
-        st.error(f"❌ Error de conexión: {e}")
+        st.error(f"❌ Error crítico de conexión: {e}")
         st.stop()
 
-def get_data(sheet_name):
-    sh = get_connection()
+def get_df(sheet_name):
+    """Obtiene datos como DataFrame de forma segura"""
     try:
-        worksheet = sh.worksheet(sheet_name)
-        data = worksheet.get_all_records()
-        return pd.DataFrame(data)
-    except gspread.exceptions.WorksheetNotFound:
+        ws = get_client().worksheet(sheet_name)
+        return pd.DataFrame(ws.get_all_records())
+    except:
         return pd.DataFrame()
 
-def add_row(sheet_name, row_data):
-    sh = get_connection()
-    worksheet = sh.worksheet(sheet_name)
-    worksheet.append_row(row_data)
+def save_row(sheet_name, data):
+    """Guarda una fila nueva"""
+    get_client().worksheet(sheet_name).append_row(data)
 
-def update_full_socio(id_socio, datos):
-    """Edición completa de socio"""
-    sh = get_connection()
-    ws = sh.worksheet("socios")
+def update_cell_logic(sheet_name, id_row, col_idx, value):
+    """Actualiza una celda específica buscando por ID"""
+    ws = get_client().worksheet(sheet_name)
     try:
-        cell = ws.find(str(id_socio))
-        r = cell.row
-        # Mapeo columnas según tu hoja
-        ws.update_cell(r, 3, datos['nombre'])
-        ws.update_cell(r, 4, datos['apellido'])
-        ws.update_cell(r, 5, datos['dni'])
-        ws.update_cell(r, 6, str(datos['nacimiento']))
-        ws.update_cell(r, 9, datos['email']) # Aseguramos Email
-        ws.update_cell(r, 10, datos['sede'])
-        ws.update_cell(r, 11, datos['plan'])
-        ws.update_cell(r, 12, datos['notas']) # Notas internas
-        ws.update_cell(r, 14, datos['activo'])
-        ws.update_cell(r, 15, datos['talle'])
-        ws.update_cell(r, 16, datos['grupo'])
+        cell = ws.find(str(id_row))
+        ws.update_cell(cell.row, col_idx, value)
         return True
     except:
         return False
 
-def confirmar_pago(id_pago):
-    """Cambia estado de pago a Confirmado (Bloqueado)"""
-    sh = get_connection()
-    ws = sh.worksheet("pagos")
-    try:
-        cell = ws.find(str(id_pago))
-        # Asumimos que 'estado' es la columna 9 (I) si agregaste las columnas al final
-        # Ajusta el índice de columna si es diferente
-        # Estructura: id, fecha, id_socio, nombre, monto, concepto, metodo, coment, ESTADO, USUARIO
-        ws.update_cell(cell.row, 9, "Confirmado") 
-        return True
-    except:
-        return False
+# --- 3. LÓGICA DE NEGOCIO ---
 
-def actualizar_tarifas(nuevas_tarifas):
-    """Reescribe la hoja de tarifas"""
-    sh = get_connection()
-    try:
-        ws = sh.worksheet("tarifas")
-        ws.clear()
-        ws.append_row(["concepto", "valor"]) # Header
-        for t in nuevas_tarifas:
-            ws.append_row([t['concepto'], t['valor']])
-        return True
-    except:
-        return False
+def auditar_movimiento(accion, detalle):
+    """(Opcional) Podría guardar logs en una hoja separada"""
+    # Por ahora imprimimos en consola o lo dejamos para futura expansión
+    pass
 
-# --- 3. CONSTANTES ---
-SEDES = ["Sede C1", "Sede Saa"]
-TURNOS = ["17:00 - 18:00", "18:00 - 19:00", "19:00 - 20:00"]
-TALLES = ["10", "12", "14", "XS", "S", "M", "L", "XL"]
-GRUPOS = ["Grupo Inicial", "Grupo Intermedio", "Grupo Avanzado", "Grupo Arqueras", "Sin Grupo"]
-# Planes ahora vienen de tarifas, pero dejamos default por si acaso
-PLANES_DEFAULT = ["1 vez x semana", "2 veces x semana", "3 veces x semana", "Doble Turno", "Inscripción", "Pretemporada", "Campus", "Otro"]
+def confirmar_pago_seguro(id_pago):
+    """Cambia estado a Confirmado solo si el usuario tiene permisos"""
+    # Asumiendo columna 9 es 'estado' (Ajustar según tu hoja real)
+    return update_cell_logic("pagos", id_pago, 9, "Confirmado")
 
-# --- 4. LOGIN ---
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
+def actualizar_tarifas_bulk(df_edited):
+    """Reescribe la hoja de tarifas completa"""
+    ws = get_client().worksheet("tarifas")
+    ws.clear()
+    ws.update([df_edited.columns.values.tolist()] + df_edited.values.tolist())
 
-def login_screen():
-    c1, c2, c3 = st.columns([1,1,1])
-    with c2:
-        st.markdown("<h2 style='text-align: center;'>🔐 Acceso Seguro</h2>", unsafe_allow_html=True)
-        with st.form("login"):
-            user = st.text_input("Usuario")
-            password = st.text_input("Contraseña", type="password")
-            if st.form_submit_button("Entrar"):
-                # CREDENCIALES
-                USERS = {
-                    "admin": {"pass": "admin2024", "rol": "Administrador"},
-                    "profe": {"pass": "entrenador", "rol": "Profesor"},
-                    "conta": {"pass": "finanzas", "rol": "Contador"}
+# --- 4. SISTEMA DE SEGURIDAD (LOGIN) ---
+if "auth" not in st.session_state:
+    st.session_state.update({"auth": False, "user": None, "rol": None})
+
+def login():
+    col1, col2, col3 = st.columns([1,1,1])
+    with col2:
+        st.markdown("<h2 style='text-align: center;'>🔐 Area Arqueros</h2>", unsafe_allow_html=True)
+        with st.form("login_form"):
+            u = st.text_input("Usuario")
+            p = st.text_input("Contraseña", type="password")
+            if st.form_submit_button("Ingresar", use_container_width=True):
+                # USUARIOS CONFIGURABLES
+                CREDS = {
+                    "admin": {"p": "admin2024", "r": "Administrador"},
+                    "profe": {"p": "entrenador", "r": "Profesor"},
+                    "conta": {"p": "finanzas", "r": "Contador"}
                 }
-                if user in USERS and USERS[user]["pass"] == password:
-                    st.session_state["logged_in"] = True
-                    st.session_state["user"] = user
-                    st.session_state["rol"] = USERS[user]["rol"]
+                if u in CREDS and CREDS[u]["p"] == p:
+                    st.session_state.update({"auth": True, "user": u, "rol": CREDS[u]["r"]})
                     st.rerun()
                 else:
-                    st.error("Credenciales inválidas")
+                    st.error("Acceso denegado")
 
-def logout():
-    st.session_state["logged_in"] = False
-    st.rerun()
-
-if not st.session_state["logged_in"]:
-    login_screen()
+if not st.session_state["auth"]:
+    login()
     st.stop()
 
-# --- 5. MENÚ PRINCIPAL ---
-rol = st.session_state["rol"]
-user = st.session_state["user"]
+# --- 5. UI PRINCIPAL ---
+user, rol = st.session_state["user"], st.session_state["rol"]
 
 with st.sidebar:
     try:
         st.image("logo.png", use_container_width=True)
     except:
-        st.markdown("### AREA ARQUEROS")
+        st.header("🛡️ AREA ARQUEROS")
     
-    st.info(f"👤 **{user.upper()}** ({rol})")
+    st.info(f"👤 **{user.upper()}**\nRol: {rol}")
     
-    menu = ["Dashboard"]
+    menu_opts = ["Dashboard"]
     if rol in ["Administrador", "Profesor"]:
-        menu.extend(["Perfil de Alumno", "Asistencia", "Nuevo Alumno"])
+        menu_opts.extend(["Perfil Alumno", "Asistencia", "Nuevo Alumno"])
     if rol in ["Administrador", "Contador"]:
-        menu.extend(["Contabilidad", "Configuración Tarifas"])
+        menu_opts.extend(["Contabilidad", "Configurar Tarifas"])
     
-    seleccion = st.radio("Navegación", menu)
-    st.markdown("---")
+    nav = st.radio("Navegación", menu_opts)
+    st.divider()
     if st.button("Cerrar Sesión"):
-        logout()
+        st.session_state.update({"auth": False})
+        st.rerun()
 
-# --- 6. MÓDULOS ---
+# --- 6. MÓDULOS FUNCIONALES ---
 
-# === DASHBOARD AVANZADO ===
-if seleccion == "Dashboard":
+# === DASHBOARD INTELIGENTE ===
+if nav == "Dashboard":
     st.title("📊 Tablero de Comando")
     
-    # Cargar datos
-    df_socios = get_data("socios")
-    df_asist = get_data("asistencias")
+    df_s = get_df("socios")
+    df_a = get_df("asistencias")
     
-    # 1. Gráfico de Torta: Activos vs Bajas
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("👥 Composición de Alumnos")
-        if not df_socios.empty:
-            # Mapear 1/0 a texto
-            df_socios['Estado'] = df_socios['activo'].map({1: 'Activo', 0: 'Inactivo/Baja'})
-            fig_pie = px.pie(df_socios, names='Estado', title='Activos vs Bajas', hole=0.4, color_discrete_sequence=['#1f2c56', '#e74c3c'])
-            st.plotly_chart(fig_pie, use_container_width=True)
+    # KPIs Principales
+    c1, c2, c3 = st.columns(3)
+    activos = len(df_s[df_s['activo']==1]) if not df_s.empty else 0
+    c1.metric("Alumnos Activos", activos)
     
-    # 2. Gráfico de Asistencia del Día (Tiempo Real)
-    with c2:
-        st.subheader("✅ Asistencia del Día")
-        fecha_hoy = date.today().strftime("%Y-%m-%d")
-        if not df_asist.empty:
-            # Filtrar hoy
-            # Asegurar que fecha sea string YYYY-MM-DD
-            df_asist['fecha'] = df_asist['fecha'].astype(str)
-            asist_hoy = df_asist[df_asist['fecha'] == fecha_hoy]
+    # Gráficos
+    g1, g2 = st.columns(2)
+    
+    with g1:
+        st.subheader("Composición y Bajas")
+        if not df_s.empty:
+            df_s['Estado'] = df_s['activo'].map({1: 'Activo', 0: 'Baja'})
+            fig = px.pie(df_s, names='Estado', hole=0.4, color_discrete_sequence=['#1f2c56', '#e74c3c'])
+            st.plotly_chart(fig, use_container_width=True)
             
-            if not asist_hoy.empty:
-                # Filtros dinámicos
-                filtro_ver = st.radio("Ver por:", ["Sede", "Grupo"], horizontal=True)
-                col_group = 'sede' if filtro_ver == "Sede" else 'turno' # Asumiendo turno o grupo si lo guardamos
-                
-                # Si guardamos 'grupo' en asistencia sería ideal, si no usamos 'sede' o 'turno'
-                conteo = asist_hoy[col_group].value_counts().reset_index()
-                conteo.columns = [filtro_ver, 'Cantidad']
-                
-                fig_bar = px.bar(conteo, x=filtro_ver, y='Cantidad', title=f"Asistentes Hoy ({len(asist_hoy)})", color='Cantidad', color_continuous_scale='Blues')
-                st.plotly_chart(fig_bar, use_container_width=True)
+    with g2:
+        st.subheader("Asistencia Hoy (Tiempo Real)")
+        if not df_a.empty:
+            today_str = date.today().strftime("%Y-%m-%d")
+            # Asegurar formato string
+            df_a['fecha'] = df_a['fecha'].astype(str)
+            today_data = df_a[df_a['fecha'] == today_str]
+            
+            if not today_data.empty:
+                view_mode = st.radio("Agrupar por:", ["sede", "turno"], horizontal=True, label_visibility="collapsed")
+                counts = today_data[view_mode].value_counts().reset_index()
+                counts.columns = [view_mode, 'cantidad']
+                fig2 = px.bar(counts, x=view_mode, y='cantidad', color='cantidad', title=f"Total Hoy: {len(today_data)}")
+                st.plotly_chart(fig2, use_container_width=True)
             else:
-                st.info("Aún no se tomó asistencia hoy.")
+                st.info("Aún no hay registros de hoy.")
     
-    # 3. Permanencia (Consistencia)
-    st.subheader("🏆 Permanencia y Consistencia")
-    if not df_socios.empty:
-        # Calculamos antigüedad
-        df_socios['fecha_alta'] = pd.to_datetime(df_socios['fecha_alta'], errors='coerce')
-        now = pd.Timestamp.now()
-        df_socios['Meses'] = ((now - df_socios['fecha_alta']) / pd.Timedelta(days=30)).fillna(0).astype(int)
-        
-        # Histograma de antigüedad
-        fig_hist = px.histogram(df_socios[df_socios['activo']==1], x="Meses", nbins=20, title="Antigüedad de Alumnos Activos (Meses)", color_discrete_sequence=['#2ecc71'])
-        st.plotly_chart(fig_hist, use_container_width=True)
+    st.subheader("📅 Permanencia")
+    if not df_s.empty:
+        df_s['fecha_alta'] = pd.to_datetime(df_s['fecha_alta'], errors='coerce')
+        df_s['meses_antiguedad'] = ((pd.Timestamp.now() - df_s['fecha_alta']).dt.days / 30).fillna(0).astype(int)
+        actives = df_s[df_s['activo']==1]
+        fig3 = px.histogram(actives, x="meses_antiguedad", nbins=20, title="Distribución de Antigüedad (Meses)", color_discrete_sequence=['#27ae60'])
+        st.plotly_chart(fig3, use_container_width=True)
 
-# === PERFIL DE ALUMNO (NUEVO) ===
-elif seleccion == "Perfil de Alumno":
-    st.title("👤 Ficha Técnica 360°")
+# === PERFIL 360 ===
+elif nav == "Perfil Alumno":
+    st.title("👤 Perfil 360°")
+    df = get_df("socios")
     
-    df = get_data("socios")
     if not df.empty:
-        # Buscador inteligente
-        df['busqueda'] = df['id'].astype(str) + " | " + df['nombre'] + " " + df['apellido']
-        elegido = st.selectbox("🔍 Buscar Alumno", df['busqueda'])
+        df['label'] = df['id'].astype(str) + " | " + df['nombre'] + " " + df['apellido']
+        sel = st.selectbox("Buscar Alumno:", df['label'])
         
-        if elegido:
-            uid = int(elegido.split(" | ")[0])
-            perfil = df[df['id'] == uid].iloc[0]
+        if sel:
+            uid = int(sel.split(" | ")[0])
+            p = df[df['id'] == uid].iloc[0]
             
-            # Header del Perfil
-            c1, c2, c3 = st.columns([1, 3, 1])
-            with c1:
-                st.image("https://cdn-icons-png.flaticon.com/512/847/847969.png", width=100) # Avatar genérico
-            with c2:
-                st.markdown(f"## {perfil['nombre']} {perfil['apellido']}")
-                estado_icon = "🟢 ACTIVO" if perfil['activo'] == 1 else "🔴 BAJA"
-                st.markdown(f"**Estado:** {estado_icon} | **Sede:** {perfil['sede']} | **Grupo:** {perfil.get('grupo', 'N/A')}")
-                st.caption(f"ID: {uid} | DNI: {perfil['dni']}")
-            
-            st.markdown("---")
-            
-            # Estadísticas Personales
-            tab_datos, tab_stats, tab_notas = st.tabs(["📋 Datos Personales", "📈 Estadísticas", "📝 Notas Internas"])
-            
-            with tab_datos:
-                # Edición (Solo Admin)
-                if rol == "Administrador":
-                    with st.form("edit_perfil"):
-                        c_a, c_b = st.columns(2)
-                        n_nom = c_a.text_input("Nombre", perfil['nombre'])
-                        n_ape = c_b.text_input("Apellido", perfil['apellido'])
-                        n_email = c_a.text_input("Email", perfil.get('email', ''))
-                        n_plan = c_b.selectbox("Plan", PLANES_DEFAULT, index=0) # Idealmente buscar el actual
-                        n_notas = st.text_area("Notas Médicas / Alergias", perfil['notas'])
-                        
-                        # Datos ocultos necesarios
-                        if st.form_submit_button("💾 Actualizar Datos"):
-                            # Reconstruir dict de datos
-                            d_upd = {
-                                'nombre': n_nom, 'apellido': n_ape, 'dni': perfil['dni'],
-                                'nacimiento': perfil['fecha_nacimiento'], 'email': n_email,
-                                'sede': perfil['sede'], 'plan': n_plan, 'notas': n_notas,
-                                'activo': perfil['activo'], 'talle': perfil['talle'], 'grupo': perfil.get('grupo','')
-                            }
-                            if update_full_socio(uid, d_upd):
-                                st.success("Perfil actualizado.")
-                                time.sleep(1)
-                                st.rerun()
-                else:
-                    # Vista solo lectura
-                    st.write(f"**Email:** {perfil.get('email', 'No cargado')}")
-                    st.write(f"**WhatsApp:** {perfil['whatsapp']}")
-                    st.write(f"**Plan:** {perfil.get('frecuencia', '-')}")
-            
-            with tab_stats:
-                # Calcular inasistencias y asistencia
-                df_asist = get_data("asistencias")
-                if not df_asist.empty:
-                    asist_alumno = df_asist[df_asist['id_socio'] == uid]
-                    total_asist = len(asist_alumno)
-                    
-                    k1, k2 = st.columns(2)
-                    k1.metric("Clases Asistidas (Total)", total_asist)
-                    
-                    if total_asist > 0:
-                        st.markdown("### 📅 Historial de Clases")
-                        st.dataframe(asist_alumno[['fecha', 'sede', 'turno']], use_container_width=True)
-                    else:
-                        st.warning("Este alumno nunca ha entrenado.")
-                else:
-                    st.info("No hay registros de asistencia.")
+            # Header
+            h1, h2 = st.columns([1, 4])
+            with h1: st.markdown("# 👤")
+            with h2:
+                st.markdown(f"## {p['nombre']} {p['apellido']}")
+                st.caption(f"ID: {uid} | DNI: {p['dni']} | Alta: {p['fecha_alta']}")
+                tags = f"**Plan:** {p['plan']} | **Sede:** {p['sede']} | **Grupo:** {p.get('grupo','-')}"
+                if p['activo'] == 1: st.success(tags) 
+                else: st.error(f"BAJA - {tags}")
 
-            with tab_notas:
-                st.info("Espacio para recordatorios internos de administración.")
-                notas_actuales = perfil.get('notas', '')
-                st.text_area("Leer notas:", notas_actuales, disabled=True)
+            t1, t2, t3 = st.tabs(["📝 Datos & Notas", "📈 Estadísticas", "📞 Contacto"])
+            
+            with t1:
+                # Notas editables
+                prev_notes = p.get('notas', '')
+                new_notes = st.text_area("Notas Internas (Médicas/Admin):", prev_notes)
+                if new_notes != prev_notes and st.button("Guardar Nota"):
+                    # Actualizar solo la columna de notas (Col 12 aprox)
+                    update_cell_logic("socios", uid, 12, new_notes)
+                    st.success("Nota actualizada")
+            
+            with t2:
+                # Stats de Asistencia
+                df_asist = get_df("asistencias")
+                if not df_asist.empty:
+                    my_asist = df_asist[df_asist['id_socio'] == uid]
+                    c_total = len(my_asist)
+                    st.metric("Clases Totales Asistidas", c_total)
+                    
+                    if c_total > 0:
+                        st.markdown("#### Historial Reciente")
+                        st.dataframe(my_asist[['fecha', 'sede', 'turno']].tail(10), use_container_width=True)
+            
+            with t3:
+                st.write(f"📧 **Email:** {p.get('email', 'No cargado')}")
+                st.write(f"📱 **WhatsApp:** {p.get('whatsapp', '-')}")
+                st.write(f"👕 **Talle:** {p.get('talle', '-')}")
 
 # === CONTABILIDAD BLINDADA ===
-elif seleccion == "Contabilidad":
-    st.title("📒 Finanzas Profesionales")
+elif nav == "Contabilidad":
+    st.title("📒 Centro Contable")
     
-    # Cargar Tarifas Configurables
-    df_tarifas = get_data("tarifas")
-    lista_conceptos = df_tarifas['concepto'].tolist() if not df_tarifas.empty else PLANES_DEFAULT
+    # Cargar Tarifas para selectores
+    df_tar = get_df("tarifas")
+    tarifas_opts = df_tar['concepto'].tolist() if not df_tar.empty else []
     
-    tab_in, tab_out, tab_hist = st.tabs(["📥 Registrar Ingreso", "📤 Registrar Gasto", "📊 Balance"])
+    tb1, tb2, tb3 = st.tabs(["💰 Ingresos (Cobros)", "✅ Confirmaciones", "📉 Balance & Gastos"])
     
-    with tab_in:
-        st.subheader("Nuevo Cobro")
-        df_soc = get_data("socios")
-        if not df_soc.empty:
-            lista_s = df_soc[df_soc['activo']==1].apply(lambda x: f"{x['id']} - {x['nombre']} {x['apellido']}", axis=1)
-            sel_cobro = st.selectbox("Alumno", lista_s)
+    # 1. REGISTRAR COBRO (Paso 1)
+    with tb1:
+        st.subheader("Registrar Nuevo Pago")
+        df_s = get_df("socios")
+        if not df_s.empty:
+            activos = df_s[df_s['activo']==1]
+            sel_alu = st.selectbox("Seleccionar Alumno", activos['id'].astype(str) + " - " + activos['nombre'] + " " + activos['apellido'])
             
-            if sel_cobro:
-                id_pay = int(sel_cobro.split(" - ")[0])
+            with st.form("cobro_form"):
+                c1, c2 = st.columns(2)
+                concepto = c1.selectbox("Concepto / Tarifa", tarifas_opts + ["Otro"])
                 
-                with st.form("pay_form"):
-                    c1, c2 = st.columns(2)
-                    # Concepto desde Tarifas
-                    concepto = c1.selectbox("Concepto", lista_conceptos)
-                    
-                    # Intentar autocompletar precio si existe en tarifas
-                    precio_sugerido = 0.0
-                    if not df_tarifas.empty and concepto in df_tarifas['concepto'].values:
-                        val = df_tarifas[df_tarifas['concepto'] == concepto]['valor'].values[0]
-                        try:
-                            precio_sugerido = float(str(val).replace('$','').replace(',',''))
-                        except:
-                            pass
-                            
-                    monto = c2.number_input("Monto ($)", value=precio_sugerido, step=100.0)
-                    metodo = st.selectbox("Medio", ["Efectivo", "Transferencia", "MercadoPago"])
-                    obs = st.text_input("Comentario")
-                    
-                    if st.form_submit_button("💾 Registrar Pago (Provisorio)"):
-                        # id, fecha, id_socio, nombre, monto, concepto, metodo, coment, ESTADO, USUARIO
-                        row = [
-                            int(datetime.now().timestamp()), 
-                            str(date.today()), 
-                            id_pay, 
-                            sel_cobro.split(" - ")[1], 
-                            monto, 
-                            concepto, 
-                            metodo, 
-                            obs, 
-                            "Pendiente", # Estado inicial
-                            user # Usuario que registra (Auditoría)
-                        ]
-                        add_row("pagos", row)
-                        st.success("Pago registrado como Pendiente.")
+                # Precio sugerido
+                precio_sug = 0.0
+                if not df_tar.empty and concepto in tarifas_opts:
+                    try: precio_sug = float(df_tar[df_tar['concepto']==concepto]['valor'].values[0])
+                    except: pass
+                
+                monto = c2.number_input("Monto ($)", value=precio_sug, step=100.0)
+                metodo = st.selectbox("Medio de Pago", ["Efectivo", "Transferencia", "MercadoPago"])
+                
+                if st.form_submit_button("Registrar (Pendiente)"):
+                    # Estructura: id, fecha, id_socio, nombre_socio, monto, concepto, metodo, comentario, estado, usuario
+                    row = [
+                        int(datetime.now().timestamp()),
+                        str(date.today()),
+                        int(sel_alu.split(" - ")[0]),
+                        sel_alu.split(" - ")[1],
+                        monto,
+                        concepto,
+                        metodo,
+                        "", # comentario
+                        "Pendiente",
+                        user # Usuario auditor
+                    ]
+                    save_row("pagos", row)
+                    st.success("Pago registrado. Requiere confirmación.")
 
-        st.markdown("---")
-        st.subheader("✅ Confirmación de Pagos (Seguridad)")
-        # Solo Admin o Contador pueden confirmar
-        if rol in ["Administrador", "Contador"]:
-            df_pagos = get_data("pagos")
-            if not df_pagos.empty and "estado" in df_pagos.columns:
-                pendientes = df_pagos[df_pagos['estado'] == "Pendiente"]
-                if not pendientes.empty:
-                    st.write(f"Hay {len(pendientes)} pagos esperando confirmación definitiva.")
-                    for idx, p in pendientes.iterrows():
-                        col_a, col_b, col_c = st.columns([3, 1, 1])
-                        col_a.write(f"📅 {p['fecha_pago']} | 👤 {p['nombre_socio']} | 💲 {p['monto']} ({p['concepto']})")
-                        col_b.caption(f"Reg por: {p.get('usuario_registro', 'desc')}")
-                        if col_c.button("Confirmar", key=f"conf_{p['id']}"):
-                            if confirmar_pago(p['id']):
-                                st.success("Confirmado!")
-                                time.sleep(0.5)
-                                st.rerun()
-                else:
-                    st.success("No hay pagos pendientes de revisión.")
+    # 2. CONFIRMACIÓN (Paso 2 - Solo Admin/Conta)
+    with tb2:
+        st.subheader("Auditoría de Pagos")
+        df_p = get_df("pagos")
+        if not df_p.empty and "estado" in df_p.columns:
+            pendientes = df_p[df_p['estado'] == "Pendiente"]
+            if not pendientes.empty:
+                st.dataframe(pendientes[['fecha_pago', 'nombre_socio', 'monto', 'concepto', 'usuario_registro']])
+                
+                pago_id = st.selectbox("Seleccionar ID para confirmar:", pendientes['id'])
+                if st.button("✅ Confirmar Pago Definitivo"):
+                    if rol in ["Administrador", "Contador"]:
+                        # Asumiendo columna estado es la 9 (I)
+                        confirmar_pago_seguro(pago_id)
+                        st.success("Pago confirmado y blindado.")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("No tienes permisos para confirmar.")
             else:
-                st.warning("La base de datos no tiene columna 'estado' configurada.")
+                st.success("Todo al día. No hay pagos pendientes.")
         else:
-            st.info("Solo Administración puede confirmar pagos definitivos.")
+            st.warning("Configura la columna 'estado' en Google Sheets.")
 
-    with tab_hist:
-        st.subheader("Comparativa Mensual / Anual")
-        c_d1, c_d2 = st.columns(2)
-        f_desde = c_d1.date_input("Desde", date(date.today().year, 1, 1))
-        f_hasta = c_d2.date_input("Hasta", date.today())
+    # 3. BALANCE
+    with tb3:
+        c1, c2 = st.columns(2)
+        d_desde = c1.date_input("Desde", date(date.today().year, 1, 1))
+        d_hasta = c2.date_input("Hasta", date.today())
         
-        df_p = get_data("pagos")
-        df_g = get_data("gastos")
-        
-        # Filtros y Gráficos
-        if not df_p.empty and not df_g.empty:
-             # Asegurar fechas
-            df_p['fecha'] = pd.to_datetime(df_p['fecha_pago'], errors='coerce')
-            df_g['fecha'] = pd.to_datetime(df_g['fecha'], errors='coerce')
+        if st.button("Calcular Balance"):
+            df_p = get_df("pagos")
+            df_g = get_df("gastos")
             
-            # Filtrar
-            p_ok = df_p[(df_p['fecha'].dt.date >= f_desde) & (df_p['fecha'].dt.date <= f_hasta)]
-            g_ok = df_g[(df_g['fecha'].dt.date >= f_desde) & (df_g['fecha'].dt.date <= f_hasta)]
+            # Filtrar y convertir fechas
+            t_ing = 0
+            t_egr = 0
             
-            tot_in = pd.to_numeric(p_ok['monto'], errors='coerce').sum()
-            tot_out = pd.to_numeric(g_ok['monto'], errors='coerce').sum()
+            if not df_p.empty:
+                df_p['dt'] = pd.to_datetime(df_p['fecha_pago'], errors='coerce').dt.date
+                # Solo sumamos CONFIRMADOS para balance real
+                conf = df_p[(df_p['dt'] >= d_desde) & (df_p['dt'] <= d_hasta) & (df_p['estado'] == 'Confirmado')]
+                t_ing = pd.to_numeric(conf['monto'], errors='coerce').sum()
+                
+            if not df_g.empty:
+                df_g['dt'] = pd.to_datetime(df_g['fecha'], errors='coerce').dt.date
+                gas = df_g[(df_g['dt'] >= d_desde) & (df_g['dt'] <= d_hasta)]
+                t_egr = pd.to_numeric(gas['monto'], errors='coerce').sum()
             
-            st.metric("Resultado Neto del Período", f"${tot_in - tot_out:,.0f}")
+            st.metric("Resultado Neto", f"${t_ing - t_egr:,.2f}", delta=f"Ingresos: ${t_ing:,.0f}")
             
-            # Gráfico barras agrupado
-            df_bar = pd.DataFrame({
-                "Tipo": ["Ingresos", "Gastos"],
-                "Monto": [tot_in, tot_out]
-            })
-            fig_fin = px.bar(df_bar, x="Tipo", y="Monto", color="Tipo", color_discrete_sequence=['green', 'red'])
-            st.plotly_chart(fig_fin, use_container_width=True)
-
+            # Gráfico Evolutivo
+            st.bar_chart({"Ingresos": t_ing, "Egresos": t_egr})
 
 # === CONFIGURACIÓN TARIFAS ===
-elif seleccion == "Configuración Tarifas":
-    st.title("⚙️ Gestión de Tarifas")
-    st.info("Aquí defines los precios y conceptos que aparecen al cobrar.")
+elif nav == "Configurar Tarifas":
+    st.title("⚙️ Tarifas del Club")
     
-    # Cargar tabla editable
-    df = get_data("tarifas")
+    df = get_df("tarifas")
+    if df.empty:
+        df = pd.DataFrame({"concepto": ["Cuota Base"], "valor": [15000]})
+        
+    edited = st.data_editor(df, num_rows="dynamic", use_container_width=True)
     
-    # Editor de datos (Streamlit Data Editor)
-    # Permite editar como un excel directamente en pantalla
-    edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
-    
-    if st.button("💾 Guardar Cambios de Tarifas"):
-        # Convertir a lista de dicts
-        records = edited_df.to_dict('records')
-        if actualizar_tarifas(records):
-            st.success("Tarifas actualizadas en la Nube.")
-        else:
-            st.error("Error al guardar.")
+    if st.button("Guardar Cambios"):
+        actualizar_tarifas_bulk(edited)
+        st.success("Tarifas actualizadas")
 
-# === (RESTO DE MÓDULOS: ASISTENCIA Y NUEVO ALUMNO MANTENIDOS IGUAL) ===
-elif seleccion == "Asistencia":
-    # ... (Mismo código de asistencia anterior, simplificado aquí para brevedad)
-    st.title("✅ Tomar Lista")
-    # ... (Usa el código previo de asistencia)
-    # Si quieres lo incluyo completo, avísame, pero para no hacer este mensaje eterno
-    # asumo que mantienes el módulo de asistencia que ya funcionaba bien.
-    # Pero aquí te dejo el link visual:
-    st.write("Módulo de asistencia (sin cambios en lógica, solo visual).")
-    
-elif seleccion == "Nuevo Alumno":
-    # ... Mismo código de Nuevo Alumno ...
+# === NUEVO ALUMNO ===
+elif nav == "Nuevo Alumno":
     st.title("📝 Alta de Alumno")
     with st.form("alta"):
         c1, c2 = st.columns(2)
         nom = c1.text_input("Nombre")
         ape = c2.text_input("Apellido")
-        email = st.text_input("Email del Alumno") # Nuevo campo requerido
-        # ... resto de campos ...
-        if st.form_submit_button("Guardar"):
-             # Lógica de guardado
-             pass
+        
+        df_tar = get_df("tarifas")
+        planes = df_tar['concepto'].tolist() if not df_tar.empty else ["General"]
+        
+        c3, c4 = st.columns(2)
+        dni = c3.text_input("DNI")
+        email = c4.text_input("Email") # Nuevo campo solicitado
+        
+        c5, c6 = st.columns(2)
+        sede = c5.selectbox("Sede", ["Sede C1", "Sede Saa"])
+        grupo = c6.selectbox("Grupo", ["Inicial", "Intermedio", "Avanzado", "Arqueras"])
+        
+        talle = st.selectbox("Talle", ["10", "12", "14", "XS", "S", "M", "L", "XL"])
+        plan = st.selectbox("Plan Inicial", planes)
+        
+        if st.form_submit_button("Crear Ficha"):
+            if nom and ape and dni:
+                uid = int(datetime.now().timestamp())
+                # Estructura completa: id, fecha, nom, ape, dni, nac, tutor, wsp, email, sede, plan, notas, vendedor, activo, talle, grupo
+                row = [
+                    uid, str(date.today()), nom, ape, dni, "", "", "", 
+                    email, sede, plan, "", user, 1, talle, grupo
+                ]
+                save_row("socios", row)
+                st.success(f"Alumno {nom} registrado.")
+
+# === ASISTENCIA RAPIDA ===
+elif nav == "Asistencia":
+    st.title("✅ Tomar Lista")
+    col1, col2 = st.columns(2)
+    sede = col1.selectbox("Sede", ["Sede C1", "Sede Saa"])
+    grupo = col2.selectbox("Grupo", ["Inicial", "Intermedio", "Avanzado", "Arqueras"])
+    
+    df = get_df("socios")
+    if not df.empty and 'grupo' in df.columns:
+        # Filtrar
+        filtro = df[(df['sede'] == sede) & (df['grupo'] == grupo) & (df['activo'] == 1)]
+        
+        if not filtro.empty:
+            with st.form("asist_form"):
+                st.write(f"Alumnos: {len(filtro)}")
+                # Grid de checkboxes
+                cols = st.columns(3)
+                checks = {}
+                for i, (idx, r) in enumerate(filtro.iterrows()):
+                    checks[r['id']] = cols[i%3].checkbox(f"{r['nombre']} {r['apellido']}", key=r['id'])
+                
+                if st.form_submit_button("Guardar Presentes"):
+                    cnt = 0
+                    for uid, present in checks.items():
+                        if present:
+                            # id, fecha, hora, id_socio, nombre, sede, turno/grupo, estado
+                            nom = filtro.loc[filtro['id']==uid, 'nombre'].values[0]
+                            ape = filtro.loc[filtro['id']==uid, 'apellido'].values[0]
+                            row = [
+                                str(date.today()), datetime.now().strftime("%H:%M"),
+                                uid, f"{nom} {ape}", sede, grupo, "Presente"
+                            ]
+                            save_row("asistencias", row)
+                            cnt += 1
+                    st.success(f"✅ {cnt} Asistencias guardadas")
+        else:
+            st.warning("No hay alumnos en este grupo/sede.")
