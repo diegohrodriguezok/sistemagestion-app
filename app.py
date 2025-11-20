@@ -14,56 +14,67 @@ st.set_page_config(
     page_icon="🏹"
 )
 
-# --- CSS CORREGIDO (PESTAÑAS LEGIBLES) ---
+# --- CSS PREMIUM (ESTÉTICA MEJORADA) ---
 st.markdown("""
     <style>
-        /* Botones */
+        /* Botones Generales */
         .stButton>button {
-            border-radius: 6px;
+            border-radius: 8px;
             height: 45px;
             font-weight: 600;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: none;
             background-color: #1f2c56;
-            color: white !important; /* Texto blanco forzado */
+            color: white !important;
             transition: all 0.3s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         .stButton>button:hover {
             background-color: #2c3e50;
-            border-color: white;
-            color: #ffffff !important;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            box-shadow: 0 5px 10px rgba(0,0,0,0.2);
+            transform: translateY(-2px);
         }
         
-        /* Métricas */
+        /* Métricas (Tarjetas) */
         div[data-testid="stMetricValue"] {
-            font-size: 1.6rem !important;
+            font-size: 1.8rem !important;
             font-weight: 700;
+            color: #1f2c56;
         }
-
-        /* --- ESTILO DE PESTAÑAS (SOLAPAS) --- */
+        
+        /* --- PESTAÑAS (SOLAPAS) ESTILO MODERNO --- */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 8px;
-        }
-        
-        /* Pestaña NO seleccionada */
-        .stTabs [data-baseweb="tab"] {
-            height: 50px;
-            white-space: pre-wrap;
-            background-color: #f0f2f6; /* Gris suave */
-            color: #31333F !important; /* Texto GRIS OSCURO forzado (para que se lea siempre) */
-            border-radius: 4px 4px 0px 0px;
-            padding-top: 10px;
+            gap: 10px; /* Espacio entre pestañas */
+            background-color: transparent;
             padding-bottom: 10px;
-            border: 1px solid #e0e0e0;
-            border-bottom: none;
         }
         
-        /* Pestaña SELECCIONADA */
+        /* Estilo de pestaña inactiva (Limpio y Minimalista) */
+        .stTabs [data-baseweb="tab"] {
+            height: 45px;
+            white-space: pre-wrap;
+            background-color: #ffffff;
+            color: #555555; /* Gris oscuro para lectura fácil */
+            border-radius: 10px; /* Bordes redondeados modernos */
+            border: 1px solid #e0e0e0;
+            padding: 0 20px;
+            font-weight: 600;
+            transition: all 0.2s ease-in-out;
+        }
+        
+        /* Efecto al pasar el mouse */
+        .stTabs [data-baseweb="tab"]:hover {
+            border-color: #1f2c56;
+            color: #1f2c56;
+            background-color: #f8f9fa;
+        }
+        
+        /* Pestaña SELECCIONADA (Resaltada) */
         .stTabs [aria-selected="true"] {
             background-color: #1f2c56 !important; /* Azul Corporativo */
-            color: #ffffff !important; /* Texto BLANCO forzado */
-            font-weight: bold;
+            color: #ffffff !important; /* Blanco Puro */
             border: none;
+            box-shadow: 0 4px 6px rgba(31, 44, 86, 0.25); /* Sombra suave */
+            transform: scale(1.02); /* Efecto pop sutil */
         }
     </style>
     """, unsafe_allow_html=True)
@@ -108,7 +119,7 @@ def update_full_socio(id_socio, d):
         ws.update_cell(r, 10, d['sede'])
         ws.update_cell(r, 11, d['plan'])
         ws.update_cell(r, 12, d['notas'])
-        # Col 13 es vendedor (no se edita usualmente)
+        # Col 13 es vendedor
         ws.update_cell(r, 14, d['activo'])
         ws.update_cell(r, 15, d['talle'])
         ws.update_cell(r, 16, d['grupo'])
@@ -182,7 +193,7 @@ with st.sidebar:
     
     menu_opts = ["Dashboard"]
     if rol in ["Administrador", "Profesor"]:
-        menu_opts.extend(["Alumnos", "Asistencia"]) # Menú unificado
+        menu_opts.extend(["Alumnos", "Asistencia"])
     if rol in ["Administrador", "Contador"]:
         menu_opts.extend(["Contabilidad", "Configurar Tarifas"])
     
@@ -322,7 +333,7 @@ elif nav == "Alumnos":
                                     time.sleep(1)
                                     st.rerun()
                     else:
-                        # VISTA SOLO LECTURA (PROFES)
+                        # VISTA SOLO LECTURA
                         c_a, c_b = st.columns(2)
                         c_a.write(f"**Tutor:** {p.get('tutor','-')}")
                         c_a.write(f"**Email:** {p.get('email','-')}")
