@@ -5,39 +5,33 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime, date, timedelta
 import time
 
-# --- 1. CONFIGURACIÓN VISUAL ---
+# --- 1. CONFIGURACIÓN DE LA APP ---
 st.set_page_config(
     page_title="Sistema de Gestión", 
     layout="wide", 
     initial_sidebar_state="expanded"
 )
 
-# CSS ADAPTABLE (Respeta el modo oscuro/claro del usuario)
+# --- CSS SEGURO (Alto Contraste) ---
+# Este estilo asegura que los textos se lean bien en Modo Claro Y Modo Oscuro
 st.markdown("""
     <style>
-        /* Tipografía profesional */
-        h1, h2, h3 {
-            font-family: 'Helvetica', sans-serif;
-        }
-        
-        /* Métricas con borde sutil que se ve bien en ambos modos */
-        .stMetric {
-            padding: 15px;
-            border-radius: 10px;
-            border: 1px solid rgba(128, 128, 128, 0.2);
-        }
-
-        /* Botones personalizados (Color corporativo) */
+        /* Botones: Azul corporativo con texto blanco forzado (siempre legible) */
         .stButton>button {
-            border-radius: 5px;
-            font-weight: bold;
+            background-color: #1f2c56;
+            color: white !important;
+            border-radius: 8px;
             border: none;
-            background-color: #1f2c56; /* Azul oscuro corporativo */
-            color: white;
+            font-weight: bold;
         }
         .stButton>button:hover {
             background-color: #2c3e50;
-            color: white;
+            color: white !important;
+        }
+        
+        /* Forzamos que las métricas tengan fondo suave para resaltar del fondo general */
+        div[data-testid="stMetricValue"] {
+            font-weight: bold;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -47,6 +41,7 @@ st.markdown("""
 def get_connection():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     try:
+        # La nube leerá los secretos directamente desde la configuración de Streamlit
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         client = gspread.authorize(creds)
@@ -77,7 +72,6 @@ def update_full_socio(id_socio, datos_actualizados):
         cell = ws.find(str(id_socio))
         row_num = cell.row
         
-        # Actualiza celdas específicas
         ws.update_cell(row_num, 3, datos_actualizados['nombre'])
         ws.update_cell(row_num, 4, datos_actualizados['apellido'])
         ws.update_cell(row_num, 5, datos_actualizados['dni'])
@@ -139,6 +133,7 @@ if not st.session_state["logged_in"]:
 rol = st.session_state["rol"]
 user = st.session_state["user"]
 
+# Intenta mostrar logo, si no hay, muestra texto
 try:
     st.sidebar.image("logo.png", use_container_width=True)
 except:
@@ -163,7 +158,6 @@ seleccion = st.sidebar.radio("Menú", menu)
 if seleccion == "Dashboard":
     st.title("📊 Estadísticas")
     
-    # Filtro de Fechas
     c1, c2 = st.columns(2)
     fecha_inicio = c1.date_input("Desde", date.today().replace(day=1))
     fecha_fin = c2.date_input("Hasta", date.today())
@@ -196,6 +190,8 @@ if seleccion == "Dashboard":
     if ingresos > 0 or egresos > 0:
         datos = pd.DataFrame({"Concepto": ["Ingresos", "Gastos"], "Monto": [ingresos, egresos]})
         st.bar_chart(datos, x="Concepto", y="Monto")
+    else:
+        st.info("No hay movimientos en este rango de fechas.")
 
 # === CONTABILIDAD ===
 elif seleccion == "Contabilidad":
@@ -208,18 +204,20 @@ elif seleccion == "Contabilidad":
             activos = df_socios[df_socios['activo'] == 1]
             lista = activos.apply(lambda x: f"{x['id']} - {x['nombre']} {x['apellido']}", axis=1)
             elegido = st.selectbox("Alumno", lista)
-            id_sel = int(elegido.split(" - ")[0])
             
-            with st.form("cobro"):
-                c1, c2 = st.columns(2)
-                monto = c1.number_input("Monto", step=100, min_value=0)
-                concepto = c2.selectbox("Concepto", ["Cuota Mensual", "Matrícula", "Indumentaria", "Torneo"])
-                metodo = st.selectbox("Medio", ["Efectivo", "Transferencia", "MercadoPago"])
-                obs = st.text_input("Nota")
-                if st.form_submit_button("Registrar Cobro"):
-                    row = [int(datetime.now().timestamp()), str(date.today()), id_sel, elegido.split(" - ")[1], monto, concepto, metodo, obs]
-                    add_row("pagos", row)
-                    st.success("Guardado.")
+            if elegido:
+                id_sel = int(elegido.split(" - ")[0])
+                
+                with st.form("cobro"):
+                    c1, c2 = st.columns(2)
+                    monto = c1.number_input("Monto", step=100, min_value=0)
+                    concepto = c2.selectbox("Concepto", ["Cuota Mensual", "Matrícula", "Indumentaria", "Torneo"])
+                    metodo = st.selectbox("Medio", ["Efectivo", "Transferencia", "MercadoPago"])
+                    obs = st.text_input("Nota")
+                    if st.form_submit_button("Registrar Cobro"):
+                        row = [int(datetime.now().timestamp()), str(date.today()), id_sel, elegido.split(" - ")[1], monto, concepto, metodo, obs]
+                        add_row("pagos", row)
+                        st.success("Guardado.")
 
     with tab2:
         with st.form("gasto"):
@@ -252,10 +250,11 @@ elif seleccion == "Nuevo Alumno":
         if st.form_submit_button("Guardar"):
             if nom and ape and dni:
                 uid = int(datetime.now().timestamp())
-                # id, fecha, nom, ape, dni, nac, tutor, wsp, email, sede, plan, notas, vendedor, activo, talle, grupo
                 row = [uid, str(date.today()), nom, ape, dni, str(nac), "", wsp, "", sede, plan, "", user, 1, talle, grupo]
                 add_row("socios", row)
                 st.success("Guardado.")
+            else:
+                st.error("Faltan datos obligatorios")
 
 # === ASISTENCIA ===
 elif seleccion == "Asistencia":
@@ -307,15 +306,11 @@ elif seleccion == "Gestión Alumnos":
                     n_sede = st.selectbox("Sede", SEDES, index=SEDES.index(curr['sede']) if curr['sede'] in SEDES else 0)
                     n_grupo = st.selectbox("Grupo", GRUPOS, index=GRUPOS.index(curr['grupo']) if curr['grupo'] in GRUPOS else 0)
                     n_act = st.selectbox("Estado", [1,0], index=0 if curr['activo']==1 else 1)
-                    # (Agrega el resto de campos si lo necesitas)
-                    # Recuperamos los campos que no editamos para no romper la fila:
-                    # nac, talle, plan
                     
                     if st.form_submit_button("Guardar Cambios"):
-                        # Construimos diccionario completo
                         datos = {
                             "nombre": n_nom, "apellido": n_ape, "dni": n_dni,
-                            "nacimiento": curr['fecha_nacimiento'], # Mantenemos original si no se editó
+                            "nacimiento": curr['fecha_nacimiento'],
                             "sede": n_sede, "plan": curr['frecuencia'], 
                             "activo": n_act, "talle": curr['talle'], "grupo": n_grupo
                         }
