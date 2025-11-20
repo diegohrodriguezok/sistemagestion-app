@@ -14,43 +14,56 @@ st.set_page_config(
     page_icon="🏹"
 )
 
+# --- CSS CORREGIDO (PESTAÑAS LEGIBLES) ---
 st.markdown("""
     <style>
+        /* Botones */
         .stButton>button {
             border-radius: 6px;
             height: 45px;
             font-weight: 600;
             border: 1px solid rgba(255,255,255,0.1);
             background-color: #1f2c56;
-            color: white;
+            color: white !important; /* Texto blanco forzado */
             transition: all 0.3s;
         }
         .stButton>button:hover {
             background-color: #2c3e50;
             border-color: white;
-            color: #ffffff;
+            color: #ffffff !important;
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
+        
+        /* Métricas */
         div[data-testid="stMetricValue"] {
             font-size: 1.6rem !important;
             font-weight: 700;
         }
+
+        /* --- ESTILO DE PESTAÑAS (SOLAPAS) --- */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 24px;
+            gap: 8px;
         }
+        
+        /* Pestaña NO seleccionada */
         .stTabs [data-baseweb="tab"] {
             height: 50px;
             white-space: pre-wrap;
-            background-color: #f0f2f6;
+            background-color: #f0f2f6; /* Gris suave */
+            color: #31333F !important; /* Texto GRIS OSCURO forzado (para que se lea siempre) */
             border-radius: 4px 4px 0px 0px;
-            gap: 1px;
             padding-top: 10px;
             padding-bottom: 10px;
+            border: 1px solid #e0e0e0;
+            border-bottom: none;
         }
+        
+        /* Pestaña SELECCIONADA */
         .stTabs [aria-selected="true"] {
-            background-color: #ffffff;
-            color: #1f2c56;
+            background-color: #1f2c56 !important; /* Azul Corporativo */
+            color: #ffffff !important; /* Texto BLANCO forzado */
             font-weight: bold;
+            border: none;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -121,8 +134,13 @@ def actualizar_tarifas_bulk(df_edited):
     ws.update([df_edited.columns.values.tolist()] + df_edited.values.tolist())
 
 def calcular_edad(fecha_nac):
-    hoy = date.today()
-    return hoy.year - fecha_nac.year - ((hoy.month, hoy.day) < (fecha_nac.month, fecha_nac.day))
+    try:
+        if isinstance(fecha_nac, str):
+            fecha_nac = datetime.strptime(fecha_nac, '%Y-%m-%d').date()
+        hoy = date.today()
+        return hoy.year - fecha_nac.year - ((hoy.month, hoy.day) < (fecha_nac.month, fecha_nac.day))
+    except:
+        return "?"
 
 # --- 3. LOGIN ---
 if "auth" not in st.session_state:
@@ -225,19 +243,28 @@ elif nav == "Alumnos":
                 uid = int(sel.split(" | ")[0])
                 p = df[df['id'] == uid].iloc[0]
                 
+                # Datos seguros
+                nombre = p.get('nombre', 'S/N')
+                apellido = p.get('apellido', 'S/N')
+                dni = p.get('dni', '-')
+                plan = p.get('plan', 'Sin Plan')
+                sede = p.get('sede', '-')
+                grupo = p.get('grupo', '-')
+                
                 # Header Info y Calculo Edad
                 try:
-                    f_nac = datetime.strptime(p['fecha_nacimiento'], '%Y-%m-%d').date()
+                    f_nac_str = str(p.get('fecha_nacimiento', ''))
+                    f_nac = datetime.strptime(f_nac_str, '%Y-%m-%d').date()
                     edad = calcular_edad(f_nac)
                 except: edad = "?"
                 
                 h1, h2 = st.columns([1, 4])
                 with h1: st.markdown("# 👤")
                 with h2:
-                    st.markdown(f"## {p['nombre']} {p['apellido']}")
-                    st.caption(f"DNI: {p['dni']} | Edad: {edad} años")
-                    tags = f"**Plan:** {p['plan']} | **Sede:** {p['sede']} | **Grupo:** {p.get('grupo','-')}"
-                    if p['activo'] == 1: st.success(tags)
+                    st.markdown(f"## {nombre} {apellido}")
+                    st.caption(f"DNI: {dni} | Edad: {edad} años")
+                    tags = f"**Plan:** {plan} | **Sede:** {sede} | **Grupo:** {grupo}"
+                    if p.get('activo', 0) == 1: st.success(tags)
                     else: st.error(f"BAJA - {tags}")
 
                 sub_t1, sub_t2 = st.tabs(["📋 Ficha Completa", "📈 Historial"])
@@ -248,37 +275,39 @@ elif nav == "Alumnos":
                         with st.form("edit_full"):
                             st.subheader("Editar Datos")
                             e1, e2 = st.columns(2)
-                            n_nom = e1.text_input("Nombre", p['nombre'])
-                            n_ape = e2.text_input("Apellido", p['apellido'])
+                            n_nom = e1.text_input("Nombre", nombre)
+                            n_ape = e2.text_input("Apellido", apellido)
                             
                             e3, e4 = st.columns(2)
-                            n_dni = e3.text_input("DNI", p['dni'])
+                            n_dni = e3.text_input("DNI", dni)
                             f_origen = f_nac if isinstance(f_nac, date) else date(2000,1,1)
                             n_nac = e4.date_input("Nacimiento", f_origen)
                             
                             e5, e6 = st.columns(2)
-                            n_tutor = e5.text_input("Tutor / Responsable", p.get('tutor', ''))
+                            n_tutor = e5.text_input("Tutor", p.get('tutor', ''))
                             n_wsp = e6.text_input("WhatsApp", p.get('whatsapp', ''))
                             
                             e7, e8 = st.columns(2)
                             n_email = e7.text_input("Email", p.get('email', ''))
-                            n_sede = e8.selectbox("Sede", ["Sede C1", "Sede Saa"], index=0 if p['sede']=="Sede C1" else 1)
+                            n_sede = e8.selectbox("Sede", ["Sede C1", "Sede Saa"], index=0 if sede=="Sede C1" else 1)
                             
                             e9, e10, e11 = st.columns(3)
-                            n_peso = e9.number_input("Peso (kg)", value=float(p.get('peso', 0) or 0))
-                            n_alt = e10.number_input("Altura (cm)", value=int(p.get('altura', 0) or 0))
+                            val_peso = float(p.get('peso', 0)) if p.get('peso') != '' else 0.0
+                            val_altura = int(p.get('altura', 0)) if p.get('altura') != '' else 0
+                            n_peso = e9.number_input("Peso", value=val_peso)
+                            n_alt = e10.number_input("Altura", value=val_altura)
                             n_talle = e11.text_input("Talle", p.get('talle', ''))
 
                             df_tar = get_df("tarifas")
                             planes_list = df_tar['concepto'].tolist() if not df_tar.empty else ["General"]
-                            curr_idx = planes_list.index(p['plan']) if p['plan'] in planes_list else 0
+                            curr_idx = planes_list.index(plan) if plan in planes_list else 0
                             
                             e12, e13 = st.columns(2)
                             n_plan = e12.selectbox("Plan", planes_list, index=curr_idx)
                             n_grupo = e13.selectbox("Grupo", ["Inicial", "Intermedio", "Avanzado", "Arqueras", "Sin Grupo"], index=0)
                             
                             n_notas = st.text_area("Notas Internas", p.get('notas', ''))
-                            n_activo = st.checkbox("Alumno Activo", value=True if p['activo']==1 else False)
+                            n_activo = st.checkbox("Alumno Activo", value=True if p.get('activo', 0)==1 else False)
 
                             if st.form_submit_button("💾 Guardar Cambios"):
                                 d_upd = {
