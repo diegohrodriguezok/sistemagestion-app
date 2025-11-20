@@ -35,6 +35,23 @@ st.markdown("""
             font-size: 1.6rem !important;
             font-weight: 700;
         }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 24px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            white-space: pre-wrap;
+            background-color: #f0f2f6;
+            border-radius: 4px 4px 0px 0px;
+            gap: 1px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #ffffff;
+            color: #1f2c56;
+            font-weight: bold;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -147,7 +164,7 @@ with st.sidebar:
     
     menu_opts = ["Dashboard"]
     if rol in ["Administrador", "Profesor"]:
-        menu_opts.extend(["Alumnos", "Asistencia"]) # Se unificó Perfil y Nuevo
+        menu_opts.extend(["Alumnos", "Asistencia"]) # Menú unificado
     if rol in ["Administrador", "Contador"]:
         menu_opts.extend(["Contabilidad", "Configurar Tarifas"])
     
@@ -208,7 +225,7 @@ elif nav == "Alumnos":
                 uid = int(sel.split(" | ")[0])
                 p = df[df['id'] == uid].iloc[0]
                 
-                # Header Info
+                # Header Info y Calculo Edad
                 try:
                     f_nac = datetime.strptime(p['fecha_nacimiento'], '%Y-%m-%d').date()
                     edad = calcular_edad(f_nac)
@@ -218,7 +235,7 @@ elif nav == "Alumnos":
                 with h1: st.markdown("# 👤")
                 with h2:
                     st.markdown(f"## {p['nombre']} {p['apellido']}")
-                    st.caption(f"DNI: {p['dni']} | Edad: {edad}")
+                    st.caption(f"DNI: {p['dni']} | Edad: {edad} años")
                     tags = f"**Plan:** {p['plan']} | **Sede:** {p['sede']} | **Grupo:** {p.get('grupo','-')}"
                     if p['activo'] == 1: st.success(tags)
                     else: st.error(f"BAJA - {tags}")
@@ -240,7 +257,7 @@ elif nav == "Alumnos":
                             n_nac = e4.date_input("Nacimiento", f_origen)
                             
                             e5, e6 = st.columns(2)
-                            n_tutor = e5.text_input("Tutor", p.get('tutor', ''))
+                            n_tutor = e5.text_input("Tutor / Responsable", p.get('tutor', ''))
                             n_wsp = e6.text_input("WhatsApp", p.get('whatsapp', ''))
                             
                             e7, e8 = st.columns(2)
@@ -248,8 +265,8 @@ elif nav == "Alumnos":
                             n_sede = e8.selectbox("Sede", ["Sede C1", "Sede Saa"], index=0 if p['sede']=="Sede C1" else 1)
                             
                             e9, e10, e11 = st.columns(3)
-                            n_peso = e9.number_input("Peso", value=float(p.get('peso', 0) or 0))
-                            n_alt = e10.number_input("Altura", value=int(p.get('altura', 0) or 0))
+                            n_peso = e9.number_input("Peso (kg)", value=float(p.get('peso', 0) or 0))
+                            n_alt = e10.number_input("Altura (cm)", value=int(p.get('altura', 0) or 0))
                             n_talle = e11.text_input("Talle", p.get('talle', ''))
 
                             df_tar = get_df("tarifas")
@@ -260,7 +277,7 @@ elif nav == "Alumnos":
                             n_plan = e12.selectbox("Plan", planes_list, index=curr_idx)
                             n_grupo = e13.selectbox("Grupo", ["Inicial", "Intermedio", "Avanzado", "Arqueras", "Sin Grupo"], index=0)
                             
-                            n_notas = st.text_area("Notas", p.get('notas', ''))
+                            n_notas = st.text_area("Notas Internas", p.get('notas', ''))
                             n_activo = st.checkbox("Alumno Activo", value=True if p['activo']==1 else False)
 
                             if st.form_submit_button("💾 Guardar Cambios"):
@@ -276,7 +293,7 @@ elif nav == "Alumnos":
                                     time.sleep(1)
                                     st.rerun()
                     else:
-                        # VISTA SOLO LECTURA
+                        # VISTA SOLO LECTURA (PROFES)
                         c_a, c_b = st.columns(2)
                         c_a.write(f"**Tutor:** {p.get('tutor','-')}")
                         c_a.write(f"**Email:** {p.get('email','-')}")
@@ -288,6 +305,7 @@ elif nav == "Alumnos":
                     df_asist = get_df("asistencias")
                     if not df_asist.empty:
                         mias = df_asist[df_asist['id_socio'] == uid]
+                        st.metric("Total Clases", len(mias))
                         st.dataframe(mias[['fecha', 'sede']].tail(10), use_container_width=True)
 
     # --- PESTAÑA 2: NUEVO ALUMNO (COMPLETO) ---
@@ -302,7 +320,7 @@ elif nav == "Alumnos":
             c3, c4 = st.columns(2)
             dni = c3.text_input("DNI")
             nac = c4.date_input("Fecha Nacimiento", min_value=date(1980,1,1), max_value=date.today())
-            st.caption(f"Edad: {calcular_edad(nac)} años")
+            st.caption(f"Edad calculada: {calcular_edad(nac)} años")
             
             c5, c6 = st.columns(2)
             peso = c5.number_input("Peso (kg)", min_value=0.0)
