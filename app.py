@@ -1,90 +1,192 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime, date
 
-# Configuración de la página (título y diseño)
-st.set_page_config(page_title="Mi Calculadora de Presupuesto", layout="centered")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Gestión Club de Arqueros", layout="wide", page_icon="⚽")
 
-# Título principal
-st.title("💰 Calculadora de Presupuesto Personal")
-st.write("Ingresa tus datos para ver cómo se distribuye tu dinero y cuánto puedes ahorrar.")
-
-st.markdown("---")
-
-# --- SECCIÓN 1: INGRESOS (Barra lateral) ---
-st.sidebar.header("1. Tus Ingresos")
-salario = st.sidebar.number_input("Salario Mensual Neto ($)", min_value=0.0, value=1000.0, step=50.0)
-otros_ingresos = st.sidebar.number_input("Otros Ingresos ($)", min_value=0.0, value=0.0, step=50.0)
-
-total_ingresos = salario + otros_ingresos
-
-# Mostrar el total de ingresos en la barra lateral
-st.sidebar.markdown(f"### Total Ingresos: **${total_ingresos:,.2f}**")
-
-
-# --- SECCIÓN 2: GASTOS (Cuerpo principal) ---
-st.header("2. Tus Gastos Mensuales")
-
-# Creamos dos columnas para que se vea más organizado
-col1, col2 = st.columns(2)
-
-with col1:
-    alquiler = st.number_input("🏡 Alquiler / Hipoteca", min_value=0.0, value=300.0)
-    comida = st.number_input("🛒 Supermercado / Comida", min_value=0.0, value=200.0)
-    servicios = st.number_input("💡 Servicios (Luz, Agua, Internet)", min_value=0.0, value=50.0)
-
-with col2:
-    transporte = st.number_input("🚌 Transporte / Gasolina", min_value=0.0, value=50.0)
-    ocio = st.number_input("🎉 Ocio y Entretenimiento", min_value=0.0, value=100.0)
-    otros = st.number_input("📦 Otros Gastos", min_value=0.0, value=50.0)
-
-# Cálculo de totales
-total_gastos = alquiler + comida + servicios + transporte + ocio + otros
-ahorro = total_ingresos - total_gastos
-
-# --- SECCIÓN 3: RESULTADOS Y GRÁFICOS ---
-st.markdown("---")
-st.header("3. Tu Análisis Financiero")
-
-# Métricas grandes (KPIs)
-kpi1, kpi2, kpi3 = st.columns(3)
-
-kpi1.metric(label="Ingresos Totales", value=f"${total_ingresos:,.2f}")
-kpi2.metric(label="Gastos Totales", value=f"${total_gastos:,.2f}", delta=f"-{total_gastos/total_ingresos:.1%}")
-kpi3.metric(label="Ahorro Mensual", value=f"${ahorro:,.2f}", delta_color="normal" if ahorro > 0 else "inverse")
-
-# Mensaje personalizado según el ahorro
-if ahorro > 0:
-    st.success(f"¡Felicidades! Estás ahorrando ${ahorro:,.2f} este mes.")
-elif ahorro == 0:
-    st.warning("Estás al límite. Tus ingresos son iguales a tus gastos.")
-else:
-    st.error(f"Cuidado, estás gastando ${abs(ahorro):,.2f} más de lo que ganas.")
-
-# --- GRÁFICO DE TORTA ---
-if total_gastos > 0:
-    # Crear un "Diccionario" de datos para el gráfico
-    datos_gastos = {
-        "Categoría": ["Alquiler", "Comida", "Servicios", "Transporte", "Ocio", "Otros"],
-        "Monto": [alquiler, comida, servicios, transporte, ocio, otros]
-    }
+# --- CONEXIÓN A GOOGLE SHEETS ---
+def get_connection():
+    """Conecta a Google Sheets usando st.secrets"""
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
     
-    # Convertirlo a un formato que Plotly entienda (DataFrame)
-    df_gastos = pd.DataFrame(datos_gastos)
-    
-    # Filtrar categorías que sean 0 para que no aparezcan en el gráfico
-    df_gastos = df_gastos[df_gastos["Monto"] > 0]
+    # Intentamos cargar las credenciales desde los secretos de Streamlit
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        client = gspread.authorize(creds)
+        # IMPORTANTE: Reemplaza este nombre con el nombre exacto de tu Hoja de Cálculo
+        sheet = client.open("BaseDatos_ClubArqueros") 
+        return sheet
+    except Exception as e:
+        st.error(f"❌ Error de conexión: {e}")
+        st.stop()
 
-    # Crear el gráfico
-    fig = px.pie(
-        df_gastos, 
-        values='Monto', 
-        names='Categoría', 
-        title='Distribución de tus Gastos',
-        hole=0.4, # Hace que sea un gráfico de dona
-        color_discrete_sequence=px.colors.sequential.RdBu
-    )
+# Función para inicializar hojas si están vacías
+def init_sheets(sh):
+    try:
+        # Intentar abrir hoja de socios, si no existe, crearla (o manejar error)
+        try:
+            w_socios = sh.worksheet("socios")
+        except:
+            w_socios = sh.add_worksheet(title="socios", rows=100, cols=20)
+            w_socios.append_row(["id", "fecha_alta", "nombre", "apellido", "dni", "fecha_nacimiento", "tutor", "whatsapp", "email", "sede", "frecuencia", "notas", "vendedor", "activo"])
+
+        try:
+            w_pagos = sh.worksheet("pagos")
+        except:
+            w_pagos = sh.add_worksheet(title="pagos", rows=100, cols=20)
+            w_pagos.append_row(["id", "fecha_pago", "id_socio", "nombre_socio", "monto", "concepto", "metodo", "comentarios"])
+
+        try:
+            w_asistencias = sh.worksheet("asistencias")
+        except:
+            w_asistencias = sh.add_worksheet(title="asistencias", rows=100, cols=20)
+            w_asistencias.append_row(["fecha", "hora", "id_socio", "nombre_socio", "sede", "turno", "presente"])
+            
+    except Exception as e:
+        st.error(f"Error inicializando hojas: {e}")
+
+# Funciones CRUD para Sheets
+def get_data(sheet_name):
+    sh = get_connection()
+    worksheet = sh.worksheet(sheet_name)
+    data = worksheet.get_all_records()
+    return pd.DataFrame(data)
+
+def add_row(sheet_name, row_data):
+    sh = get_connection()
+    worksheet = sh.worksheet(sheet_name)
+    worksheet.append_row(row_data)
+    return True
+
+# --- INTERFAZ GRÁFICA ---
+
+st.title("⚽ Sistema Cloud: Club de Arqueros")
+
+# Verificar conexión al inicio
+try:
+    sh = get_connection()
+    init_sheets(sh) # Asegurar que existan las pestañas
+except:
+    st.warning("⚠️ Configura las credenciales en .streamlit/secrets.toml para empezar.")
+    st.stop()
+
+# Menú lateral
+menu = st.sidebar.selectbox(
+    "Menú Principal", 
+    ["Inicio / Dashboard", "Nuevo Socio", "Gestión de Socios", "Registrar Asistencia", "Caja y Pagos"]
+)
+
+SEDES = ["Sede C1", "Sede Saa"]
+TURNOS = ["17:00 - 18:00", "18:00 - 19:00", "19:00 - 20:00"]
+
+# --- 1. DASHBOARD ---
+if menu == "Inicio / Dashboard":
+    st.header("📊 Estado del Club (Nube)")
+    df_socios = get_data("socios")
+    df_pagos = get_data("pagos")
     
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("Ingresa tus gastos para ver el gráfico.")
+    if not df_socios.empty:
+        # Filtrar activos (Sheets devuelve strings, convertimos a int/bool si es necesario)
+        socios_activos = df_socios[df_socios["activo"] == 1]
+        st.metric("Socios Activos", len(socios_activos))
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Socios por Sede")
+            if not socios_activos.empty:
+                st.bar_chart(socios_activos['sede'].value_counts())
+        
+        with col2:
+            st.subheader("Ingresos")
+            if not df_pagos.empty:
+                # Limpieza de datos para asegurar que sean números
+                df_pagos['monto'] = pd.to_numeric(df_pagos['monto'], errors='coerce')
+                st.metric("Total Recaudado Histórico", f"${df_pagos['monto'].sum():,.2f}")
+    else:
+        st.info("Base de datos vacía. Registra tu primer socio.")
+
+# --- 2. NUEVO SOCIO ---
+elif menu == "Nuevo Socio":
+    st.header("📝 Alta de Nuevo Arquero")
+    with st.form("form_alta"):
+        col1, col2 = st.columns(2)
+        with col1:
+            nombre = st.text_input("Nombre")
+            apellido = st.text_input("Apellido")
+            dni = st.text_input("DNI")
+            nacimiento = st.date_input("Fecha Nacimiento", min_value=date(1980,1,1))
+        with col2:
+            sede = st.selectbox("Sede", SEDES)
+            plan = st.selectbox("Plan", [1, 2, 3])
+            whatsapp = st.text_input("WhatsApp")
+            email = st.text_input("Email")
+        
+        submitted = st.form_submit_button("Guardar en Nube")
+        
+        if submitted and dni:
+            # Generar ID simple (timestamp)
+            new_id = int(datetime.now().timestamp())
+            row = [new_id, str(date.today()), nombre, apellido, dni, str(nacimiento), "", whatsapp, email, sede, plan, "", "", 1]
+            add_row("socios", row)
+            st.success("✅ Guardado en Google Sheets!")
+
+# --- 3. GESTIÓN DE SOCIOS ---
+elif menu == "Gestión de Socios":
+    st.header("👥 Directorio")
+    df = get_data("socios")
+    st.dataframe(df, use_container_width=True)
+
+# --- 4. ASISTENCIA ---
+elif menu == "Registrar Asistencia":
+    st.header("✅ Asistencia")
+    df_socios = get_data("socios")
+    
+    col1, col2 = st.columns(2)
+    sede_sel = col1.selectbox("Sede", SEDES)
+    turno_sel = col2.selectbox("Turno", TURNOS)
+    
+    if not df_socios.empty:
+        socios_sede = df_socios[df_socios["sede"] == sede_sel]
+        
+        with st.form("asist"):
+            seleccionados = []
+            for idx, s in socios_sede.iterrows():
+                if st.checkbox(f"{s['nombre']} {s['apellido']}", key=s['id']):
+                    seleccionados.append(s)
+            
+            if st.form_submit_button("Guardar Asistencia"):
+                for s in seleccionados:
+                    row = [str(date.today()), datetime.now().strftime("%H:%M"), s['id'], f"{s['nombre']} {s['apellido']}", sede_sel, turno_sel, "Presente"]
+                    add_row("asistencias", row)
+                st.success("Asistencias subidas a la nube.")
+
+# --- 5. PAGOS ---
+elif menu == "Caja y Pagos":
+    st.header("💰 Caja")
+    df_socios = get_data("socios")
+    
+    if not df_socios.empty:
+        lista = df_socios.apply(lambda x: f"{x['id']} - {x['nombre']} {x['apellido']}", axis=1)
+        elegido = st.selectbox("Socio", lista)
+        
+        monto = st.number_input("Monto", step=100)
+        concepto = st.selectbox("Concepto", ["Cuota", "Matrícula", "Ropa"])
+        
+        if st.button("Registrar Pago"):
+            id_s = elegido.split(" - ")[0]
+            nombre_s = elegido.split(" - ")[1]
+            # ID_PAGO, FECHA, ID_SOCIO, NOMBRE, MONTO, CONCEPTO, METODO, COMENTARIO
+            row = [int(datetime.now().timestamp()), str(date.today()), id_s, nombre_s, monto, concepto, "Efectivo", ""]
+            add_row("pagos", row)
+            st.success("Pago registrado.")
+            
+    # Mostrar últimos pagos
+    st.subheader("Historial en Vivo")
+    st.dataframe(get_data("pagos").tail(5), use_container_width=True)
