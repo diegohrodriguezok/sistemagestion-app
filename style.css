@@ -1,7 +1,7 @@
 /* --- BOTONES GENERALES --- */
 .stButton>button {
     border-radius: 6px;
-    height: 42px; /* Altura estándar cómoda */
+    height: 42px;
     font-weight: 600;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background-color: #1f2c56; /* Azul Corporativo */
@@ -9,6 +9,15 @@
     transition: all 0.2s;
     width: 100%;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* BOTÓN COMPACTO PARA LISTA DE ALUMNOS */
+div[data-testid="stButton"] > button {
+    text-align: left !important; /* Alineación a la izquierda para parecer renglón */
+    padding-left: 15px !important;
+    height: auto !important; /* Altura automática para adaptarse al contenido */
+    min-height: 50px; /* Mínimo cómodo para el dedo */
+    white-space: normal !important; /* Permitir saltos de línea si es largo */
 }
 
 .stButton>button:hover {
@@ -27,7 +36,7 @@ button[kind="primary"] {
 
 /* --- MÉTRICAS Y TARJETAS --- */
 div[data-testid="stMetricValue"] {
-    font-size: 1.6rem !important;
+    font-size: 1.8rem !important;
     font-weight: 800;
     color: #4ea8de !important; /* Azul Neón para resaltar */
 }
@@ -69,7 +78,6 @@ div[data-testid="metric-container"] label {
 
 /* --- ESTILOS ESPECÍFICOS --- */
 
-/* Tarjeta de Entrenamiento (compacta) */
 .training-card {
     background-color: #262730;
     padding: 10px;
@@ -99,16 +107,9 @@ div[data-testid="metric-container"] label {
     color: #2ecc71;
 }
 
-/* Ajustes de Texto para Visibilidad */
 h1, h2, h3 {
-    color: #4ea8de !important; /* Títulos en azul claro visible */
+    color: #4ea8de !important;
 }
 p, span, div {
-    color: #e0e0e0; /* Texto general claro */
-}
-
-/* Ajuste especial para botón de lista de alumnos (hacerlo parecer una fila) */
-.stButton button {
-    text-align: left !important;
-    padding-left: 15px !important;
+    color: #e0e0e0;
 }
