@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import plotly.express as px
+import plotly.graph_objects as go
 import time
 from fpdf import FPDF
 import base64
@@ -25,11 +26,15 @@ def get_now_ar():
 def get_today_ar():
     return get_now_ar().date()
 
-# --- CSS PREMIUM ---
+# --- CSS PREMIUM (Dashboard Mejorado) ---
 st.markdown("""
     <style>
+        /* General */
+        .stApp { background-color: #f8f9fa; }
+        
+        /* Botones */
         .stButton>button {
-            border-radius: 6px;
+            border-radius: 8px;
             height: 45px;
             font-weight: 600;
             border: none;
@@ -44,11 +49,8 @@ st.markdown("""
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             transform: translateY(-2px);
         }
-        div[data-testid="stMetricValue"] {
-            font-size: 1.6rem !important;
-            font-weight: 700;
-            color: #1f2c56;
-        }
+        
+        /* Pestañas */
         .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; padding-bottom: 10px; }
         .stTabs [data-baseweb="tab"] {
             height: 45px; background-color: #ffffff; color: #555555;
@@ -58,6 +60,41 @@ st.markdown("""
             background-color: #1f2c56 !important; color: #ffffff !important;
             border: none; box-shadow: 0 4px 6px rgba(31, 44, 86, 0.25);
         }
+
+        /* --- ESTILOS DASHBOARD --- */
+        /* Tarjetas de Métricas (KPIs) */
+        div[data-testid="metric-container"] {
+            background-color: #ffffff;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            color: #1f2c56;
+        }
+        div[data-testid="metric-container"] label {
+            color: #6c757d; /* Color etiqueta */
+            font-size: 0.9rem;
+        }
+        div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+            color: #1f2c56;
+            font-size: 2rem !important;
+            font-weight: 800;
+        }
+        
+        /* Contenedores de Gráficos */
+        .chart-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border: 1px solid #e0e0e0;
+            margin-bottom: 20px;
+        }
+        
+        /* Títulos de secciones */
+        h3 { color: #1f2c56; font-weight: 700; font-size: 1.3rem; margin-bottom: 15px; }
+        
+        /* Caja Diaria */
         .caja-box {
             background-color: #e8f5e9; padding: 20px; border-radius: 10px;
             border-left: 6px solid #2e7d32; margin-bottom: 20px; color: #1b5e20;
@@ -78,20 +115,18 @@ def get_client():
         st.stop()
 
 def get_df(sheet_name):
-    """Lee datos y normaliza nombres de columnas (quita espacios y pone minúsculas)"""
+    """Lee datos y normaliza nombres de columnas"""
     try:
         ws = get_client().worksheet(sheet_name)
         data = ws.get_all_records()
         df = pd.DataFrame(data)
-        # --- LIMPIEZA AUTOMÁTICA DE ENCABEZADOS ---
         if not df.empty:
             df.columns = df.columns.str.strip().str.lower()
         return df
     except: return pd.DataFrame()
 
 def save_row(sheet_name, data):
-    try:
-        get_client().worksheet(sheet_name).append_row(data)
+    try: get_client().worksheet(sheet_name).append_row(data)
     except: pass
 
 def log_action(id_ref, accion, detalle, user):
@@ -243,35 +278,103 @@ with st.sidebar:
 
 if nav == "Dashboard":
     st.title("📊 Tablero de Comando")
-    st.caption(f"Fecha del Sistema: {get_today_ar().strftime('%d/%m/%Y')}")
+    st.caption(f"Última actualización: {get_now_ar().strftime('%d/%m/%Y %H:%M')}")
     
     df_s = get_df("socios")
     df_a = get_df("asistencias")
+    df_p = get_df("pagos")
     
-    c1, c2, c3 = st.columns(3)
+    # 1. KPIs PRINCIPALES (4 Columnas)
+    k1, k2, k3, k4 = st.columns(4)
+    
+    # KPI 1: Alumnos Activos
     activos = len(df_s[df_s['activo']==1]) if not df_s.empty else 0
-    c1.metric("Alumnos Activos", activos)
+    k1.metric("👥 Plantel Activo", activos)
     
-    g1, g2 = st.columns(2)
-    with g1:
-        st.subheader("Estado del Plantel")
-        if not df_s.empty:
-            df_s['estado'] = df_s['activo'].map({1: 'Activo', 0: 'Baja'})
-            fig = px.pie(df_s, names='estado', hole=0.4, color_discrete_sequence=['#1f2c56', '#e74c3c'])
-            st.plotly_chart(fig, use_container_width=True)
-    with g2:
-        st.subheader("Asistencia Hoy")
+    # KPI 2: Presentes Hoy
+    presentes_hoy = 0
+    today_str = get_today_ar().strftime("%Y-%m-%d")
+    if not df_a.empty:
+        df_a['fecha'] = df_a['fecha'].astype(str)
+        presentes_hoy = len(df_a[df_a['fecha'] == today_str])
+    k2.metric("✅ Asistencia Hoy", presentes_hoy)
+    
+    # KPI 3: Ingresos Mes Actual (Confirmados)
+    ingresos_mes = 0
+    mes_actual = get_today_ar().month
+    if not df_p.empty:
+        df_p['dt'] = pd.to_datetime(df_p['fecha_pago'], errors='coerce')
+        # Filtro: Mes actual Y Estado confirmado
+        pagos_mes = df_p[ (df_p['dt'].dt.month == mes_actual) & (df_p['estado'] == 'Confirmado') ]
+        ingresos_mes = pd.to_numeric(pagos_mes['monto'], errors='coerce').sum()
+    k3.metric("💰 Ingresos (Mes)", f"${ingresos_mes:,.0f}")
+    
+    # KPI 4: Deudores Mes Actual (Estimado)
+    deudores_count = 0
+    if not df_p.empty:
+        # Deudas generadas que siguen en estado Pendiente
+        deudas_pend = df_p[ (df_p['dt'].dt.month == mes_actual) & (df_p['estado'] == 'Pendiente') ]
+        deudores_count = len(deudas_pend)
+    k4.metric("⚠️ Pagos Pendientes", deudores_count, delta_color="inverse")
+
+    st.markdown("---")
+
+    # 2. GRÁFICOS PRINCIPALES (Fila 1)
+    c_g1, c_g2 = st.columns([2, 1])
+    
+    with c_g1:
+        st.markdown("### 📅 Tendencia de Asistencia (7 días)")
         if not df_a.empty:
-            today_str = get_today_ar().strftime("%Y-%m-%d")
-            df_a['fecha'] = df_a['fecha'].astype(str)
-            today_data = df_a[df_a['fecha'] == today_str]
-            if not today_data.empty:
-                view_mode = st.radio("Agrupar por:", ["sede", "turno"], horizontal=True)
-                counts = today_data[view_mode].value_counts().reset_index()
-                counts.columns = [view_mode, 'cantidad']
-                fig2 = px.bar(counts, x=view_mode, y='cantidad', title=f"Total: {len(today_data)}", color_discrete_sequence=['#1f2c56'])
-                st.plotly_chart(fig2, use_container_width=True)
-            else: st.info("Sin registros hoy.")
+            # Filtramos últimos 7 días
+            fecha_limite = get_today_ar() - timedelta(days=7)
+            df_a['dt_obj'] = pd.to_datetime(df_a['fecha'], errors='coerce').dt.date
+            recientes = df_a[df_a['dt_obj'] >= fecha_limite]
+            
+            if not recientes.empty:
+                daily_att = recientes.groupby('fecha')['id_socio'].count().reset_index()
+                daily_att.columns = ['Fecha', 'Alumnos']
+                fig_line = px.bar(daily_att, x='Fecha', y='Alumnos', text='Alumnos', color_discrete_sequence=['#1f2c56'])
+                fig_line.update_layout(height=350, xaxis_title=None)
+                st.plotly_chart(fig_line, use_container_width=True)
+            else:
+                st.info("No hay datos recientes.")
+        else:
+            st.info("Sin datos de asistencia.")
+
+    with c_g2:
+        st.markdown("### 📍 Distribución Sede")
+        if not df_s.empty:
+            activos_df = df_s[df_s['activo']==1]
+            dist_sede = activos_df['sede'].value_counts().reset_index()
+            dist_sede.columns = ['Sede', 'Cantidad']
+            fig_donut = px.pie(dist_sede, values='Cantidad', names='Sede', hole=0.6, color_discrete_sequence=px.colors.qualitative.Prism)
+            fig_donut.update_layout(height=350, showlegend=True, legend=dict(orientation="h"))
+            st.plotly_chart(fig_donut, use_container_width=True)
+
+    # 3. INFORMACIÓN ADICIONAL (Fila 2)
+    c_d1, c_d2 = st.columns(2)
+    
+    with c_d1:
+        st.markdown("### 🎂 Cumpleaños del Mes")
+        if not df_s.empty:
+            try:
+                # Parseamos fechas
+                df_s['nac_dt'] = pd.to_datetime(df_s['fecha_nacimiento'], errors='coerce')
+                cumples = df_s[ (df_s['activo']==1) & (df_s['nac_dt'].dt.month == mes_actual) ]
+                if not cumples.empty:
+                    cumples['Día'] = cumples['nac_dt'].dt.day
+                    cumples = cumples.sort_values('Día')
+                    st.dataframe(cumples[['Día', 'nombre', 'apellido', 'sede']], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay cumpleaños este mes.")
+            except: st.error("Error al procesar fechas.")
+
+    with c_d2:
+        st.markdown("### 💸 Últimos Ingresos")
+        if not df_p.empty:
+            # Últimos 5 pagos confirmados
+            ultimos = df_p[df_p['estado']=='Confirmado'].tail(5).iloc[::-1]
+            st.dataframe(ultimos[['fecha_pago', 'nombre_socio', 'monto', 'concepto']], use_container_width=True, hide_index=True)
 
 elif nav == "Alumnos":
     if st.session_state["view_profile_id"] is None:
@@ -385,11 +488,8 @@ elif nav == "Alumnos":
         with t_log:
             df_l = get_df("logs")
             if not df_l.empty:
-                # --- CORRECCIÓN ROBUSTA ---
-                # Verifica qué columnas existen realmente en la hoja
                 available_cols = df_l.columns.tolist()
                 target_cols = ['fecha', 'usuario', 'accion', 'detalle']
-                # Filtra solo las columnas que existen
                 final_cols = [c for c in target_cols if c in available_cols]
                 
                 if 'id_ref' in available_cols:
@@ -409,6 +509,11 @@ elif nav == "Alumnos":
 # === ASISTENCIA ===
 elif nav == "Asistencia":
     st.title("✅ Tomar Asistencia")
+    # ... Lógica de asistencia existente ...
+    c1, c2 = st.columns(2)
+    sede_sel = c1.selectbox("Sede", ["Sede C1", "Sede Saa"])
+    grupo_sel = c2.selectbox("Grupo", ["Infantil", "Juvenil", "Adulto"])
+    # ... etc ...
     st.info("Sistema de Asistencia Operativo")
 
 # === CONTABILIDAD ===
