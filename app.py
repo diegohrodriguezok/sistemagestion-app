@@ -78,9 +78,15 @@ def get_client():
         st.stop()
 
 def get_df(sheet_name):
+    """Lee datos y normaliza nombres de columnas (quita espacios y pone minúsculas)"""
     try:
         ws = get_client().worksheet(sheet_name)
-        return pd.DataFrame(ws.get_all_records())
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        # --- LIMPIEZA AUTOMÁTICA DE ENCABEZADOS ---
+        if not df.empty:
+            df.columns = df.columns.str.strip().str.lower()
+        return df
     except: return pd.DataFrame()
 
 def save_row(sheet_name, data):
@@ -250,8 +256,8 @@ if nav == "Dashboard":
     with g1:
         st.subheader("Estado del Plantel")
         if not df_s.empty:
-            df_s['Estado'] = df_s['activo'].map({1: 'Activo', 0: 'Baja'})
-            fig = px.pie(df_s, names='Estado', hole=0.4, color_discrete_sequence=['#1f2c56', '#e74c3c'])
+            df_s['estado'] = df_s['activo'].map({1: 'Activo', 0: 'Baja'})
+            fig = px.pie(df_s, names='estado', hole=0.4, color_discrete_sequence=['#1f2c56', '#e74c3c'])
             st.plotly_chart(fig, use_container_width=True)
     with g2:
         st.subheader("Asistencia Hoy")
@@ -377,22 +383,28 @@ elif nav == "Alumnos":
                 st.dataframe(mis_a[['fecha', 'sede', 'turno']].sort_values('fecha', ascending=False), use_container_width=True)
 
         with t_log:
-            # --- CORRECCIÓN DEL ERROR: VERIFICAR COLUMNAS ANTES DE MOSTRAR ---
             df_l = get_df("logs")
             if not df_l.empty:
-                required_cols = ['fecha', 'usuario', 'accion', 'detalle']
-                available_cols = [c for c in required_cols if c in df_l.columns]
+                # --- CORRECCIÓN ROBUSTA ---
+                # Verifica qué columnas existen realmente en la hoja
+                available_cols = df_l.columns.tolist()
+                target_cols = ['fecha', 'usuario', 'accion', 'detalle']
+                # Filtra solo las columnas que existen
+                final_cols = [c for c in target_cols if c in available_cols]
                 
-                if 'id_ref' in df_l.columns:
+                if 'id_ref' in available_cols:
                     mis_l = df_l[df_l['id_ref'].astype(str) == str(uid)]
-                    if not mis_l.empty and available_cols:
-                        st.dataframe(mis_l[available_cols], use_container_width=True)
+                    if not mis_l.empty:
+                        if final_cols:
+                            st.dataframe(mis_l[final_cols], use_container_width=True)
+                        else:
+                            st.warning("No se encontraron columnas de datos en la hoja logs.")
                     else:
-                        st.info("No hay registros de auditoría para este perfil.")
+                        st.info("Sin registros para este alumno.")
                 else:
-                    st.warning("La hoja 'logs' no tiene la columna 'id_ref'. Verifique Google Sheets.")
+                    st.warning("La hoja 'logs' no tiene la columna 'id_ref'. Revise Google Sheets.")
             else:
-                st.info("No hay registros de auditoría.")
+                st.info("Hoja de logs vacía.")
 
 # === ASISTENCIA ===
 elif nav == "Asistencia":
