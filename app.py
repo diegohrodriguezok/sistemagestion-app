@@ -19,10 +19,24 @@ st.set_page_config(
     page_icon="logo.png"
 )
 
+# --- CARGAR CSS EXTERNO ---
+def local_css(file_name):
+    try:
+        with open(file_name) as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.warning(f"No se encontró el archivo de estilos {file_name}")
+
+# Cargar estilos
+local_css("style.css")
+
 # --- FUNCIONES DE TIEMPO ARGENTINA (UTC-3) ---
 def get_now_ar():
-    tz = pytz.timezone('America/Argentina/Buenos_Aires')
-    return datetime.now(tz)
+    try:
+        tz = pytz.timezone('America/Argentina/Buenos_Aires')
+        return datetime.now(tz)
+    except:
+        return datetime.now()
 
 def get_today_ar():
     return get_now_ar().date()
@@ -31,76 +45,6 @@ def get_today_ar():
 def traducir_dia(fecha_dt):
     dias = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
     return dias[fecha_dt.weekday()]
-
-# --- CSS PREMIUM ---
-st.markdown("""
-    <style>
-        /* Estilos Generales */
-        .stApp {
-            background-color: #f8f9fa;
-        }
-        .stButton>button {
-            border-radius: 6px;
-            height: 40px;
-            font-weight: 600;
-            border: none;
-            background-color: #1f2c56;
-            color: white !important;
-            transition: all 0.2s;
-            width: 100%;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .stButton>button:hover {
-            background-color: #2c3e50;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            transform: translateY(-1px);
-        }
-        div[data-testid="stMetricValue"] {
-            font-size: 1.6rem !important;
-            font-weight: 700;
-            color: #1f2c56;
-        }
-        .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; padding-bottom: 10px; }
-        .stTabs [data-baseweb="tab"] {
-            height: 45px; background-color: #ffffff; color: #555555;
-            border-radius: 8px; border: 1px solid #e0e0e0; padding: 0 20px; font-weight: 600;
-        }
-        .stTabs [aria-selected="true"] {
-            background-color: #1f2c56 !important; color: #ffffff !important;
-            border: none; box-shadow: 0 4px 6px rgba(31, 44, 86, 0.25);
-        }
-        .caja-box {
-            background-color: #e8f5e9; padding: 20px; border-radius: 10px;
-            border-left: 6px solid #2e7d32; margin-bottom: 20px; color: #1b5e20;
-        }
-        .student-card {
-            padding: 15px;
-            background-color: white;
-            border-radius: 8px;
-            border: 1px solid #e0e0e0;
-            margin-bottom: 10px;
-        }
-        .training-card {
-            background-color: #f8f9fa;
-            padding: 12px;
-            border-radius: 6px;
-            border-left: 5px solid #1f2c56;
-            border: 1px solid #eee;
-            margin-bottom: 8px;
-        }
-        .auto-gen-box {
-            background-color: #e3f2fd;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 5px solid #2196f3;
-            margin-bottom: 20px;
-            animation: fadeIn 1s;
-        }
-        .status-vencido { color: #dc3545; font-weight: bold; }
-        .status-ok { color: #28a745; font-weight: bold; }
-        .status-pending { color: #ffc107; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
 
 # --- 2. GESTOR DE CONEXIÓN ---
 @st.cache_resource
@@ -155,14 +99,17 @@ def get_config_value(key, default_val):
 
 def set_config_value(key, value):
     sh = get_client()
-    try: ws = sh.worksheet("config")
-    except: 
+    try:
+        ws = sh.worksheet("config")
+    except:
         ws = sh.add_worksheet("config", 100, 2)
         ws.append_row(["clave", "valor"])
+    
     try:
         cell = ws.find(key)
         ws.update_cell(cell.row, 2, str(value))
-    except: ws.append_row([key, str(value)])
+    except:
+        ws.append_row([key, str(value)])
     return True
 
 def update_full_socio(id_socio, d, user_admin, original_data=None):
@@ -171,7 +118,7 @@ def update_full_socio(id_socio, d, user_admin, original_data=None):
     try:
         cell = ws.find(str(id_socio))
         r = cell.row
-        # Mapeo estricto de columnas
+        # Mapeo estricto
         ws.update_cell(r, 3, d['nombre'])
         ws.update_cell(r, 4, d['apellido'])
         ws.update_cell(r, 5, d['dni'])
@@ -184,17 +131,20 @@ def update_full_socio(id_socio, d, user_admin, original_data=None):
         ws.update_cell(r, 12, d['notas'])
         ws.update_cell(r, 14, d['activo'])
         ws.update_cell(r, 15, d['talle'])
-        ws.update_cell(r, 16, d['grupo']) 
+        ws.update_cell(r, 16, d['grupo'])
         ws.update_cell(r, 17, d['peso'])    
         ws.update_cell(r, 18, d['altura'])
         
         cambios = []
         if original_data:
             for k, v in d.items():
-                if str(v) != str(original_data.get(k, '')): cambios.append(f"{k}: {v}")
+                if str(v) != str(original_data.get(k, '')):
+                    cambios.append(f"{k}: {v}")
         if cambios: log_action(id_socio, "Edición Perfil", " | ".join(cambios), user_admin)
         return True
-    except: return False
+    except Exception as e:
+        st.error(f"Error Update: {e}")
+        return False
 
 def update_plan_socio(id_socio, nuevo_plan):
     sh = get_client()
@@ -215,8 +165,10 @@ def registrar_pago_existente(id_pago, metodo, user_cobrador, estado_final, nuevo
         ws.update_cell(r, 8, nota_conciliacion) 
         ws.update_cell(r, 9, estado_final) 
         ws.update_cell(r, 10, user_cobrador)
+        
         if nuevo_monto: ws.update_cell(r, 5, nuevo_monto)
         if nuevo_concepto: ws.update_cell(r, 6, nuevo_concepto)
+            
         log_action(id_pago, "Cobro Deuda", f"Cobrado por {user_cobrador}. Estado: {estado_final}", user_cobrador)
         return True
     except: return False
@@ -308,7 +260,8 @@ def login():
                     if u in CREDS and str(CREDS[u]["p"]) == p:
                         st.session_state.update({"auth": True, "user": u, "rol": CREDS[u]["r"]})
                         st.rerun()
-                    else: st.error("Datos incorrectos")
+                    else:
+                        st.error("Datos incorrectos")
                 except: st.error("Error en configuración de usuarios.")
 
 def logout():
@@ -649,115 +602,99 @@ elif nav == "Contabilidad":
     tab_cuotas, tab_ocasional, tab_rep = st.tabs(["📋 Gestión Pagos", "🛍️ Ocasionales", "📊 Caja"])
     
     with tab_cuotas:
-        # --- AUTOMATIZACIÓN DE GENERACIÓN DE CUOTAS ---
         dia_corte = int(get_config_value("dia_corte", 19))
-        hoy_ar = get_today_ar()
-        
-        mes_actual_idx = hoy_ar.month - 1
-        if hoy_ar.day >= dia_corte:
-            target_idx = (mes_actual_idx + 1) % 12
-            year_target = hoy_ar.year + 1 if mes_actual_idx == 11 else hoy_ar.year
+        hoy = get_today_ar()
+        idx_m = hoy.month - 1
+        if hoy.day >= dia_corte:
+            t_idx = (idx_m + 1) % 12
+            yr = hoy.year + 1 if idx_m == 11 else hoy.year
         else:
-            target_idx = mes_actual_idx
-            year_target = hoy_ar.year
-        mes_sugerido_txt = MESES[target_idx]
-        mes_completo_target = f"{mes_sugerido_txt} {year_target}"
-        st.caption(f"Período: **{mes_completo_target}**")
+            t_idx = idx_m
+            yr = hoy.year
+        mes_target = f"{MESES[t_idx]} {yr}"
+        st.caption(f"Período: **{mes_target}**")
         
-        # Lógica automática al entrar
+        # AUTO-GENERACIÓN
         df_pag = get_df("pagos")
         df_soc = get_df("socios")
         df_tar = get_df("tarifas")
         
         pagos_gen = []
         if not df_pag.empty and 'mes_cobrado' in df_pag.columns:
-            # Buscar CUALQUIER registro de pago/deuda para ese mes y concepto Cuota
-            pagos_mes = df_pag[(df_pag['mes_cobrado'] == mes_completo_target) & (df_pag['concepto'].astype(str).str.contains("Cuota"))]
+            pagos_mes = df_pag[(df_pag['mes_cobrado'] == mes_target) & (df_pag['concepto'].astype(str).str.contains("Cuota"))]
             pagos_gen = pagos_mes['id_socio'].unique()
             
         if not df_soc.empty:
-            # Alumnos activos sin registro de cuota este mes
             pendientes = df_soc[(df_soc['activo']==1) & (~df_soc['id'].isin(pagos_gen))]
-            
             if not pendientes.empty:
-                # Ejecutar Generación
-                filas_nuevas = []
+                filas = []
                 for idx, row_s in pendientes.iterrows():
-                    precio = 15000
+                    pr = 15000
                     if not df_tar.empty and row_s['plan'] in df_tar['concepto'].values:
-                        precio = df_tar[df_tar['concepto']==row_s['plan']]['valor'].values[0]
-                    
-                    row_p = [
-                        generate_id(), str(get_today_ar()), 
-                        row_s['id'], f"{row_s['nombre']} {row_s['apellido']}", 
-                        precio, "Cuota Mensual", "Pendiente", f"Plan: {row_s['plan']}", 
-                        "Pendiente", "Sistema Auto", mes_completo_target
-                    ]
-                    filas_nuevas.append(row_p)
-                
-                if save_rows_bulk("pagos", filas_nuevas):
-                    st.markdown(f"""<div class="auto-gen-box"><h4>🔄 Sistema Automático</h4><p>Se generaron {len(filas_nuevas)} cuotas para {mes_completo_target}.</p></div>""", unsafe_allow_html=True)
+                        pr = df_tar[df_tar['concepto']==row_s['plan']]['valor'].values[0]
+                    row_p = [generate_id(), str(get_today_ar()), row_s['id'], f"{row_s['nombre']} {row_s['apellido']}", pr, "Cuota Mensual", "Pendiente", f"Plan: {row_s['plan']}", "Pendiente", "System", mes_target]
+                    filas.append(row_p)
+                if save_rows_bulk("pagos", filas):
+                    st.markdown(f"""<div class="auto-gen-box"><h4>🔄 Auto-Generación</h4><p>{len(filas)} cuotas creadas para {mes_target}.</p></div>""", unsafe_allow_html=True)
                     time.sleep(2)
                     st.rerun()
 
-        # --- GESTIÓN DE COBROS ---
+        # COBRO
         if st.session_state["cobro_alumno_id"]:
             uid = st.session_state["cobro_alumno_id"]
-            # Recargar DFs
-            df_pag = get_df("pagos")
             df_soc = get_df("socios")
-            
             alu = df_soc[df_soc['id']==uid].iloc[0]
             st.subheader(f"Cobrando a: {alu['nombre']}")
             if st.button("Cancelar"):
                 st.session_state["cobro_alumno_id"] = None
                 st.rerun()
             
-            # Buscar si hay deuda pendiente para el mes target
-            deuda_existente_id = None
+            # Formulario Cobro
+            df_tar = get_df("tarifas")
+            lst = df_tar['concepto'].tolist() if not df_tar.empty else ["General"]
+            idx_p = lst.index(alu['plan']) if alu['plan'] in lst else 0
+            
+            c1, c2 = st.columns(2)
+            conc = c1.selectbox("Concepto", lst, index=idx_p)
+            pr = 0.0
+            if not df_tar.empty:
+                m = df_tar[df_tar['concepto']==conc]
+                if not m.empty:
+                    try: pr = float(str(m.iloc[0]['valor']).replace('$',''))
+                    except: pass
+            mon = c2.number_input("Monto", value=pr)
+            
+            c3, c4 = st.columns(2)
+            met = c3.selectbox("Medio", ["Efectivo", "Transferencia", "MercadoPago"])
+            mes_p = c4.selectbox("Mes", [mes_target] + [f"{m} {yr}" for m in MESES])
+            
+            nota = st.text_area("Nota")
+            conf = st.checkbox("Confirmar Auto", value=True)
+            
+            deuda_id = None
             if not df_pag.empty:
-                 check = df_pag[(df_pag['id_socio']==uid) & (df_pag['mes_cobrado']==mes_completo_target) & (df_pag['estado']=='Pendiente')]
-                 if not check.empty:
-                     deuda_existente_id = check.iloc[0]['id']
-                     st.warning(f"Se actualizará la deuda de {mes_completo_target}.")
+                 check = df_pag[(df_pag['id_socio']==uid) & (df_pag['mes_cobrado']==mes_p) & (df_pag['estado']=='Pendiente')]
+                 if not check.empty: deuda_id = check.iloc[0]['id']
 
-            with st.form("pay_direct"):
-                df_tar = get_df("tarifas")
-                lst = df_tar['concepto'].tolist() if not df_tar.empty else ["General"]
-                idx_p = lst.index(alu['plan']) if alu['plan'] in lst else 0
-                conc = st.selectbox("Concepto", lst, index=idx_p)
-                pr = 0.0
-                if not df_tar.empty:
-                    m = df_tar[df_tar['concepto']==conc]
-                    if not m.empty:
-                        try: pr = float(str(m.iloc[0]['valor']).replace('$',''))
-                        except: pass
+            if st.button("✅ PAGAR", type="primary", use_container_width=True):
+                if conc != alu['plan']: update_plan_socio(uid, conc)
+                st_pago = "Confirmado" if conf else "Pendiente"
                 
-                mon = st.number_input("Monto", value=pr)
-                met = st.selectbox("Medio", ["Efectivo", "Transferencia", "MercadoPago"])
-                mes_p = st.selectbox("Mes", [mes_completo_target] + [f"{m} {year_target}" for m in MESES])
-                nota = st.text_input("Nota")
-                conf = st.checkbox("Confirmar Auto", value=True)
+                if deuda_id:
+                    registrar_pago_existente(deuda_id, met, user, st_pago, mon, conc, nota)
+                else:
+                    row = [generate_id(), str(get_today_ar()), uid, f"{alu['nombre']} {alu['apellido']}", mon, conc, met, nota, st_pago, user, mes_p]
+                    save_row("pagos", row)
                 
-                if st.form_submit_button("Pagar"):
-                    if conc != alu['plan']: update_plan_socio(uid, conc)
-                    st_pago = "Confirmado" if conf else "Pendiente"
-                    
-                    if deuda_existente_id:
-                         registrar_pago_existente(deuda_existente_id, met, user, st_pago, mon, conc, nota)
-                    else:
-                        row = [generate_id(), str(get_today_ar()), uid, f"{alu['nombre']} {alu['apellido']}", mon, conc, met, nota, st_pago, user, mes_p]
-                        save_row("pagos", row)
-                    
-                    st.success("Registrado")
-                    d_pdf = {"fecha":str(get_today_ar()), "alumno":f"{alu['nombre']} {alu['apellido']}", "monto":mon, "concepto":conc, "metodo":met, "mes":mes_p, "nota":nota}
-                    pdf_b = generar_pdf(d_pdf)
-                    b64 = base64.b64encode(pdf_b).decode()
-                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="Recibo.pdf"><button>Descargar Recibo</button></a>'
-                    st.markdown(href, unsafe_allow_html=True)
-                    time.sleep(4)
-                    st.session_state["cobro_alumno_id"] = None
-                    st.rerun()
+                st.success("Registrado")
+                d_pdf = {"fecha":str(get_today_ar()), "alumno":f"{alu['nombre']} {alu['apellido']}", "monto":mon, "concepto":conc, "metodo":met, "mes":mes_p, "nota":nota}
+                pdf_b = generar_pdf(d_pdf)
+                b64 = base64.b64encode(pdf_b).decode()
+                href = f'<a href="data:application/octet-stream;base64,{b64}" download="Recibo.pdf"><button>Descargar Recibo</button></a>'
+                st.markdown(href, unsafe_allow_html=True)
+                time.sleep(4)
+                st.session_state["cobro_alumno_id"] = None
+                st.rerun()
 
         else:
             st.subheader("Listado de Cobro")
@@ -766,7 +703,6 @@ elif nav == "Contabilidad":
             rows = col_r.selectbox("Filas", [25, 50])
             
             df_s = get_df("socios")
-            # Recargar Pagos
             df_p = get_df("pagos")
             
             if not df_s.empty:
@@ -774,55 +710,36 @@ elif nav == "Contabilidad":
                 if search:
                     df_show = df_show[df_show.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
                 
-                # Paginación
                 total_rows = len(df_show)
                 total_pages = (total_rows // rows) + 1 if rows > 0 else 1
-                if total_pages > 1: page = st.number_input("Página", 1, total_pages, 1)
-                else: page = 1
+                page = st.number_input("Página", 1, total_pages, 1)
                 start = (page - 1) * rows
                 end = start + rows
                 subset = df_show.iloc[start:end]
                 
-                # Lógica Vencimientos
-                dia_venc = int(get_config_value("dia_vencimiento", 10))
-                dia_hoy = get_today_ar().day
-                
                 cols = st.columns([3, 2, 2, 2])
                 cols[0].markdown("**Alumno**")
                 cols[1].markdown("**Sede**")
-                cols[2].markdown(f"**Estado ({mes_completo_target})**")
+                cols[2].markdown(f"**Estado ({mes_target})**")
                 cols[3].markdown("**Acción**")
                 st.markdown("---")
                 
                 for idx, row in subset.iterrows():
                     st_mes = "⚪ Sin Generar"
-                    color_cls = ""
-                    
-                    if not df_p.empty and 'mes_cobrado' in df_p.columns:
-                        pm = df_p[(df_p['id_socio']==row['id']) & (df_p['mes_cobrado']==mes_completo_target)]
+                    if not df_p.empty:
+                        pm = df_p[(df_p['id_socio']==row['id']) & (df_p['mes_cobrado']==mes_target)]
                         if not pm.empty:
-                            estado_real = pm.iloc[0]['estado']
-                            if estado_real == "Confirmado":
-                                st_mes = "✅ Al día"
-                                color_cls = "status-ok"
-                            else:
-                                # Pendiente -> Chequear Vencimiento
-                                if dia_hoy > dia_venc:
-                                    st_mes = "🔴 VENCIDO"
-                                    color_cls = "status-vencido"
-                                else:
-                                    st_mes = "🟡 A Tiempo"
-                                    color_cls = "status-pending"
+                            if "Confirmado" in pm['estado'].values: st_mes = "✅"
+                            else: st_mes = "🔴"
                     
                     c1, c2, c3, c4 = st.columns([3,2,1,1])
                     c1.write(f"**{row['nombre']} {row['apellido']}**")
                     c2.caption(row['sede'])
-                    c3.markdown(f"<span class='{color_cls}'>{st_mes}</span>", unsafe_allow_html=True)
+                    c3.write(st_mes)
                     if c4.button("Cobrar", key=f"pay_{row['id']}"):
                         st.session_state["cobro_alumno_id"] = row['id']
                         st.rerun()
                     st.divider()
-            else: st.info("No hay alumnos.")
 
     with tab_ocasional:
         st.subheader("Cobro Ocasional")
@@ -840,7 +757,7 @@ elif nav == "Contabilidad":
                     row = [generate_id(), str(get_today_ar()), int(sel.split(" - ")[0]), sel.split(" - ")[1], monto, concepto, metodo, nota, "Confirmado", user, "-"]
                     save_row("pagos", row)
                     st.success("Registrado.")
-
+    
     with tab_rep:
         st.markdown("### Caja Diaria")
         df_p = get_df("pagos")
