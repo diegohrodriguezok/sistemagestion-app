@@ -44,7 +44,6 @@ def traducir_dia(fecha_dt):
     return dias[fecha_dt.weekday()]
 
 # --- CONSTANTES GLOBALES ---
-# (Se usan como fallback si no hay configuración en Sheets)
 DEF_SEDES = ["Sede C1", "Sede Saa"]
 DEF_MOTIVOS = ["Enfermedad", "Viaje", "Sin Aviso", "Lesión", "Estudio"]
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -87,17 +86,18 @@ def save_row(sheet_name, data):
     except: pass
 
 def save_rows_bulk(sheet_name, data_list):
-    try: get_client().worksheet(sheet_name).append_rows(data_list)
-    return True
-    except: return False
+    """Función corregida: Indentación arreglada"""
+    try: 
+        get_client().worksheet(sheet_name).append_rows(data_list)
+        return True
+    except: 
+        return False
 
 def delete_row_by_condition(sheet_name, col_name, val):
-    """Borra filas que coincidan con una condición (ej: borrar inscripción)"""
+    """Borra filas que coincidan con una condición"""
     ws = get_client().worksheet(sheet_name)
     try:
-        # Busca todas las celdas que coinciden
         cell = ws.find(str(val)) 
-        # Nota: Esto borra la primera ocurrencia. Para borrar multiple requeriría loop.
         ws.delete_rows(cell.row)
         return True
     except: return False
@@ -167,7 +167,7 @@ def update_full_socio(id_socio, d, user_admin, original_data=None):
     try:
         cell = ws.find(str(id_socio))
         r = cell.row
-        # Mapeo de columnas (Verificar con Sheet)
+        # Mapeo de columnas
         ws.update_cell(r, 3, d['nombre'])
         ws.update_cell(r, 4, d['apellido'])
         ws.update_cell(r, 5, d['dni'])
@@ -219,7 +219,7 @@ def generar_pdf(datos):
 # ==========================================
 if "auth" not in st.session_state:
     st.session_state.update({"auth": False, "user": None, "rol": None, "sedes": []})
-# Estado de navegación para "Entrar" a un grupo
+# Estado de navegación
 if "selected_group_id" not in st.session_state: st.session_state["selected_group_id"] = None
 if "view_profile_id" not in st.session_state: st.session_state["view_profile_id"] = None
 
@@ -254,7 +254,10 @@ def login_page():
                     match = df_users[df_users['user'] == u]
                     if not match.empty and check_password(p, match.iloc[0]['pass_hash']):
                         udata = match.iloc[0]
-                        sedes = str(udata['sedes_acceso']).split(",") if udata['sedes_acceso'] != "Todas" else get_lista_opciones("sede", DEF_SEDES)
+                        # Procesar sedes permitidas
+                        sedes_raw = str(udata['sedes_acceso'])
+                        sedes = sedes_raw.split(",") if sedes_raw != "Todas" else get_lista_opciones("sede", DEF_SEDES)
+                        
                         st.session_state.update({"auth": True, "user": udata['nombre_completo'], "rol": udata['rol'], "sedes": sedes})
                         st.rerun()
                     else: st.error("Credenciales incorrectas")
@@ -285,7 +288,7 @@ with st.sidebar:
     menu = ["Dashboard"]
     # UNIFICACIÓN DE MÓDULOS
     if rol in ["Administrador", "Profesor", "Entrenador"]:
-        menu.extend(["Mis Grupos", "Alumnos"]) # "Asistencia" y "Entrenamientos" ahora son "Mis Grupos"
+        menu.extend(["Mis Grupos", "Alumnos"])
     if rol in ["Administrador", "Contador"]:
         menu.extend(["Contabilidad", "Configuración"])
     if rol == "Administrador": menu.append("Usuarios")
@@ -308,7 +311,6 @@ with st.sidebar:
 # === DASHBOARD ===
 if nav == "Dashboard":
     st.title("📊 Tablero de Comando")
-    # (Mismo dashboard de siempre, funciona bien)
     df_s = get_df("socios"); df_p = get_df("pagos")
     c1, c2 = st.columns(2)
     c1.metric("Alumnos Activos", len(df_s[df_s['activo']==1]) if not df_s.empty else 0)
@@ -332,7 +334,8 @@ elif nav == "Mis Grupos":
             # Filtros
             sedes_user = st.session_state.get("sedes", [])
             sedes_disp = get_lista_opciones("sede", DEF_SEDES)
-            if "Todas" not in sedes_user: sedes_disp = [s for s in sedes_disp if s in sedes_user]
+            if "Todas" not in sedes_user and sedes_user:
+                 sedes_disp = [s for s in sedes_disp if s in sedes_user]
             
             f_sede = st.selectbox("Filtrar Sede", sedes_disp)
             
@@ -341,8 +344,6 @@ elif nav == "Mis Grupos":
             
             # Filtro Seguridad Entrenador (Si no es Admin, solo ve sus grupos)
             if rol != "Administrador":
-                # Asumimos coincidencia por nombre (simple) o mostrar todo si es flexible
-                # Para v6.0 estricta:
                 grupos_sede = grupos_sede[grupos_sede['entrenador_asignado'].astype(str).str.contains(user, case=False, na=False)]
             
             if not grupos_sede.empty:
@@ -408,16 +409,17 @@ elif nav == "Mis Grupos":
                 
                 # Baja de alumno
                 with st.expander("Dar de Baja del Grupo"):
-                    baja_sel = st.selectbox("Seleccionar Alumno", inscritos['nombre_alumno'].tolist())
-                    if st.button("🗑️ Eliminar Inscripción"):
-                        # Buscar ID de inscripción para borrar
-                        id_insc_borrar = inscritos[inscritos['nombre_alumno'] == baja_sel].iloc[0]['id']
-                        # Funcion delete no implementada en gspread simple, usamos filtro inverso o lógica custom
-                        # Simulamos borrado lógico o implementamos delete_row
-                        if delete_row_by_condition("inscripciones", "id", id_insc_borrar): # Necesita implementacion
-                            st.success("Alumno removido del grupo.")
-                            time.sleep(1); st.rerun()
-                        else: st.error("Error al borrar (Falta implementar delete row específico)")
+                    if not inscritos.empty:
+                        baja_sel = st.selectbox("Seleccionar Alumno", inscritos['nombre_alumno'].tolist())
+                        if st.button("🗑️ Eliminar Inscripción"):
+                            # Buscar ID de inscripción para borrar
+                            row_borrar = inscritos[inscritos['nombre_alumno'] == baja_sel].iloc[0]
+                            id_insc_borrar = row_borrar['id']
+                            # Usamos delete_row_by_condition (id es col 1)
+                            if delete_row_by_condition("inscripciones", "id", id_insc_borrar):
+                                st.success("Alumno removido del grupo.")
+                                time.sleep(1); st.rerun()
+                            else: st.error("Error al borrar")
             else:
                 st.info("Grupo vacío.")
             
@@ -429,20 +431,22 @@ elif nav == "Mis Grupos":
                 ids_inscritos = inscritos['id_socio'].tolist() if not inscritos.empty else []
                 disponibles = activos[~activos['id'].isin(ids_inscritos)]
                 
-                alu_new = st.selectbox("Buscar Alumno", disponibles['id'].astype(str) + " - " + disponibles['nombre'] + " " + disponibles['apellido'])
-                
-                if st.button("Inscribir Fijo"):
-                    uid_al = int(alu_new.split(" - ")[0])
-                    nom_al = alu_new.split(" - ")[1]
+                if not disponibles.empty:
+                    alu_new = st.selectbox("Buscar Alumno", disponibles['id'].astype(str) + " - " + disponibles['nombre'] + " " + disponibles['apellido'])
                     
-                    # Validación de Horario (Candado)
-                    if check_horario_conflict(uid_al, grupo_data['dia'], grupo_data['horario']):
-                        st.error(f"⚠️ Conflicto: {nom_al} ya tiene clase el {grupo_data['dia']} a las {grupo_data['horario']}.")
-                    else:
-                        row_ins = [generate_id(), uid_al, nom_al, gid, f"{grupo_data['grupo']} ({grupo_data['dia']})"]
-                        save_row("inscripciones", row_ins)
-                        st.success(f"{nom_al} agregado al plantel.")
-                        time.sleep(1); st.rerun()
+                    if st.button("Inscribir Fijo"):
+                        uid_al = int(alu_new.split(" - ")[0])
+                        nom_al = alu_new.split(" - ")[1]
+                        
+                        # Validación de Horario (Candado)
+                        if check_horario_conflict(uid_al, grupo_data['dia'], grupo_data['horario']):
+                            st.error(f"⚠️ Conflicto: {nom_al} ya tiene clase el {grupo_data['dia']} a las {grupo_data['horario']}.")
+                        else:
+                            row_ins = [generate_id(), uid_al, nom_al, gid, f"{grupo_data['grupo']} ({grupo_data['dia']})"]
+                            save_row("inscripciones", row_ins)
+                            st.success(f"{nom_al} agregado al plantel.")
+                            time.sleep(1); st.rerun()
+                else: st.info("No hay alumnos disponibles para agregar.")
 
         # --- PESTAÑA B: ASISTENCIA ---
         with tab_asist:
@@ -473,10 +477,9 @@ elif nav == "Mis Grupos":
                         is_present = c_chk.checkbox(alu['nombre_alumno'], value=True, key=f"att_{alu['id']}")
                         checks[alu['id_socio']] = is_present
                         # Motivo
-                        if not is_present:
-                            notas_aus[alu['id_socio']] = c_mot.selectbox("Motivo Ausencia", [""] + get_lista_opciones("motivo_ausencia", DEF_MOTIVOS), key=f"mot_{alu['id']}")
-                        else:
-                            notas_aus[alu['id_socio']] = ""
+                        # Usar disabled=True no funciona dinámicamente en formularios st sin rerun, 
+                        # así que lo mostramos siempre y validamos logicamente.
+                        notas_aus[alu['id_socio']] = c_mot.selectbox("Motivo Ausencia", [""] + get_lista_opciones("motivo_ausencia", DEF_MOTIVOS), key=f"mot_{alu['id']}")
                 else:
                     st.caption("No hay plantel fijo.")
                 
@@ -491,7 +494,7 @@ elif nav == "Mis Grupos":
                     # Guardar Fijos
                     for uid, present in checks.items():
                         est = "Presente" if present else "Ausente"
-                        nt = notas_aus[uid]
+                        nt = notas_aus[uid] if not present else "" # Solo guardar nota si ausente
                         nm = inscritos[inscritos['id_socio']==uid].iloc[0]['nombre_alumno']
                         
                         # fecha, hora, id_socio, nombre, sede, grupo_turno, estado, nota
@@ -503,14 +506,13 @@ elif nav == "Mis Grupos":
                     if invitado_sel != "-- Ninguno --":
                         uid_i = int(invitado_sel.split(" - ")[0])
                         nom_i = invitado_sel.split(" - ")[1]
-                        r_inv = [str(fecha_lista), datetime.now().strftime("%H:%M"), uid_i, nom_i, grupo_data['sede'], f"{grupo_data['grupo']} (Invitado)", "Presente", tipo_inv]
+                        r_inv = [str(fecha_lista), datetime.now().strftime("%H:%M"), uid_i, nom_i, grupo_data['sede'], f"{grupo_data['grupo']} (Invitado)", "Presente", f"Invitado: {tipo_inv}"]
                         save_row("asistencias", r_inv)
                         cnt += 1
                         
                         # Si es Clase Extra -> Generar Deuda
                         if "Clase Extra" in tipo_inv:
-                            # Buscar precio clase suelta
-                            # (Lógica simplificada, se podría buscar en tarifas)
+                            # Buscar precio clase suelta (Hardcoded o buscar en tarifas)
                             monto_extra = 5000 
                             pago_row = [generate_id(), str(fecha_lista), uid_i, nom_i, monto_extra, "Clase Extra", "Pendiente", f"Asistió a {grupo_data['grupo']}", "Pendiente", user, str(fecha_lista)]
                             save_row("pagos", pago_row)
@@ -527,7 +529,7 @@ elif nav == "Alumnos":
         with tab1:
             df = get_df("socios")
             if not df.empty:
-                # Filtros... (Resumido, usa el código completo anterior para filtros)
+                # Filtros...
                 for idx, row in df.iterrows():
                      st.markdown(f"<div class='student-card'><b>{row['nombre']} {row['apellido']}</b> | {row['sede']}</div>", unsafe_allow_html=True)
                      if st.button(f"Ver Ficha {row['id']}", key=row['id']): 
